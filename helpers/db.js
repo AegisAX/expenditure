@@ -90,9 +90,10 @@ function checkAndMigrateDB() {
                 col: 'presDate',
                 before: () => new Promise((resolve) => {
                     db.run(
+                        // presDate가 있는 행(= 총동문회장이 결재한 문서)은
+                        // executionDate 기존값(기안일)과 무관하게 결재일로 덮어쓴다.
                         `UPDATE expenditures SET executionDate = presDate
-                         WHERE (executionDate IS NULL OR executionDate = '')
-                           AND presDate IS NOT NULL AND presDate != ''`,
+                         WHERE presDate IS NOT NULL AND presDate != ''`,
                         (e) => {
                             if (!e) console.log(">> [DB Migrate] presDate -> executionDate 복사 완료.");
                             resolve();
