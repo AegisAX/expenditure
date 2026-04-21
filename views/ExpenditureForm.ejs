@@ -624,7 +624,7 @@
 		  <tr>
 			<td class="label attach-label" style="height: 60px;">증빙자료</td>
 			<td colspan="3" class="content-cell" style="padding: 10px; font-size: 12px; line-height: 1.6;">
-			  <span id="att-guide-text">별첨 : 증빙 서류를 첨부해 주세요. (다중 선택 가능)</span>
+        <span id="att-guide-text">별첨 : 증빙 서류를 첨부해 주세요. (JPG, PNG, GIF, WEBP, PDF · 파일당 최대 25MB · 다중 선택 가능)</span>
 			  <div id="file-list"></div>
 			  <div id="new-file-area" style="margin-top:5px; display:none;">
 				<input type="file" id="attachment" multiple accept="image/*, application/pdf" onchange="window.handleFileSelect(this)">
@@ -942,7 +942,8 @@
     // [수정] 파일 선택 시 용량(10MB) 및 형식 체크 로직 강화
     window.handleFileSelect = function(input) { 
         if (input.files && input.files.length > 0) { 
-            const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB (바이트 단위)
+            const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB (서버 limits와 동일)
+            const MAX_FILE_MB   = 25;
             let hasTypeError = false;
             let hasSizeError = false;
 
@@ -966,7 +967,7 @@
                 Swal.fire({ 
                     icon: 'warning', 
                     title: '용량 초과', 
-                    text: '10MB를 초과하는 파일은 첨부할 수 없습니다.', 
+                    text: `${MAX_FILE_MB}MB를 초과하는 파일은 첨부할 수 없습니다.`,
                     confirmButtonColor: '#d33' 
                 });
             } else if (hasTypeError) {

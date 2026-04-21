@@ -5,6 +5,9 @@ const multer = require('multer');
 const uploadDir = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;  // 25MB — 클라/서버/문서 공통
+const MAX_UPLOAD_MB    = 25;
+
 const upload = multer({
     storage: multer.diskStorage({
         destination: (req, file, cb) => {
@@ -25,7 +28,7 @@ const upload = multer({
             cb(null, tempName);
         }
     }),
-    limits: { fileSize: 50 * 1024 * 1024 }
+    limits: { fileSize: MAX_UPLOAD_BYTES }
 });
 
 async function saveFile(base64Data, type, prefix) {
@@ -45,4 +48,4 @@ async function saveFile(base64Data, type, prefix) {
     }
 }
 
-module.exports = { uploadDir, upload, saveFile };
+module.exports = { uploadDir, upload, saveFile, MAX_UPLOAD_BYTES, MAX_UPLOAD_MB };

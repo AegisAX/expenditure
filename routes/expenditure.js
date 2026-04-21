@@ -5,7 +5,7 @@ const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const serialize = require('serialize-javascript');
 const db = require('../database');
-const { uploadDir, upload, saveFile } = require('../helpers/file');
+const { uploadDir, upload, saveFile, MAX_UPLOAD_MB } = require('../helpers/file');
 const { getTodayKST, getUser, getUserByPos, getNextDocNum, getSiteUrl, logAction } = require('../helpers/db');
 const { makeEmailHtml, sendEmail } = require('../helpers/email');
 const { expenditureValidator, validatePassword } = require('../middleware/validators');
@@ -135,7 +135,7 @@ const uploadMiddleware = upload.array('newAttachments');
 
 router.post('/api/submit', (req, res, next) => {
     uploadMiddleware(req, res, (err) => {
-        if (err) return res.json({ status: 'Error', msg: err.code === 'LIMIT_FILE_SIZE' ? '파일 크기 초과 (50MB)' : err.message });
+        if (err) return res.json({ status: 'Error', msg: err.code === 'LIMIT_FILE_SIZE' ? `파일 크기 초과 (${MAX_UPLOAD_MB}MB)` : err.message });
         next();
     });
 }, expenditureValidator, async (req, res) => {
