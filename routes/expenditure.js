@@ -476,19 +476,20 @@ router.post('/api/file/delete', async (req, res) => {
             }
 
             // 물리 파일 삭제
-            try {
-                await fs.promises.unlink(safePath);
-            } catch (e) {
-                console.error('File Delete Error (Ignored):', e.message);
+            if (!row) {
+                // 문서와 연결되지 않은 파일이면 바로 삭제
+                try { await fs.promises.unlink(safePath); } catch (e) {}
+                return res.json({ status: 'Success', msg: '파일이 삭제되었습니다.' });
             }
 
-            if (!row) return res.json({ status: 'Success', msg: '파일이 삭제되었습니다.' });
-
-            // DB 기록 갱신
+            // [수정] DB 먼저 갱신 → 성공 시 물리 파일 삭제 (DB 실패 시 파일 보존)
             const paths = row.file_paths.split(',').map(s => s.trim()).filter(p => p !== fileId && p !== '');
             db.run("UPDATE expenditures SET file_paths = ? WHERE docNum = ?",
-                [paths.join(','), row.docNum], (updateErr) => {
+                [paths.join(','), row.docNum], async (updateErr) => {
                     if (updateErr) return res.json({ status: 'Error', msg: 'DB 업데이트 실패' });
+                    try { await fs.promises.unlink(safePath); } catch (e) {
+                        console.error('File Delete Error (Ignored):', e.message);
+                    }
                     res.json({ status: 'Success', msg: '파일 및 DB 기록이 삭제되었습니다.' });
                 });
         }
