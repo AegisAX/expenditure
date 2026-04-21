@@ -216,8 +216,6 @@ function checkAndMigrateDB() {
     });
 }
 
-setTimeout(checkAndMigrateDB, 1000);
-
 // [수정] saveFile: 서명 파일 저장 시 'signatures' 폴더 사용
 async function saveFile(base64Data, type, prefix) {
   if (!base64Data) return "";
@@ -295,6 +293,8 @@ function logAction(req, action, details) {
         [user ? user.email : 'Unknown', user ? user.name : 'System', action, details, ip], (err) => { if (err) console.error(err); });
 }
 
+setTimeout(checkAndMigrateDB, 1000);
+setInterval(clearStaleLocks, 10 * 60 * 1000); // 10분마다 만료 락 정리
 
 // 3. 라우트 (Routes)
 app.get(['/', '/login', '/register'], (req, res) => {
@@ -303,7 +303,7 @@ app.get(['/', '/login', '/register'], (req, res) => {
 });
 
 // [수정] 로그인 API에 authLimiter 미들웨어 적용
-app.post('/api/login', authLimiter, (req, res) => {
+app.post('/api/login', authLimiter, loginValidator, (req, res) => {     // loginValidator 추가 적용
   const { email, password } = req.body;
   db.get("SELECT * FROM users WHERE email = ?", [email], async (err, row) => {
     if (err || !row) return res.json({ status: 'Fail', msg: '정보 불일치' });
@@ -357,31 +357,22 @@ app.post('/api/register', authLimiter, registerValidator, async (req, res) => {
             sigPath = await saveFile(signatureFile.data, signatureFile.type, 'SIG');
         }
 
-        db.get("SELECT count(*) as count FROM users", [], (err, row) => {
-            if (err) throw err;
-
-            // 첫 가입자는 관리자(Admin), 이후는 일반 사용자(User)
-            let role = (row && row.count === 0) ? 'Admin' : 'User';
-            let status = (role === 'Admin') ? 'Approved' : 'Pending';
-
-            const insertQuery = `
-                INSERT INTO users (
-                    email, password, name, position, phone, 
-                    signature_path, generation, role, status, login_fail_count
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-            `;
-
-            db.run(insertQuery, 
-                [email, hash, name, position, phone, sigPath, generation, role, status],
-                (err) => {
-                    if (err) {
-                        console.error("Register DB Error:", err);
-                        return res.json({ status: 'Error', msg: '가입 처리 중 오류가 발생했습니다.<br>잠시 후 다시 시도해 주세요.' });
-                    }
-                    res.json({ status: 'Success', msg: '회원가입 신청이 완료되었습니다.<br>관리자 승인 후 로그인 가능합니다.' });
+        const insertQuery = `
+            INSERT INTO users (
+                email, password, name, position, phone,
+                signature_path, generation, role, status, login_fail_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'User', 'Pending', 0)
+        `;
+        db.run(insertQuery,
+            [email, hash, name, position, phone, sigPath, generation],
+            (err) => {
+                if (err) {
+                    console.error("Register DB Error:", err);
+                    return res.json({ status: 'Error', msg: '가입 처리 중 오류가 발생했습니다.<br>잠시 후 다시 시도해 주세요.' });
                 }
-            );
-        });
+                res.json({ status: 'Success', msg: '회원가입 신청이 완료되었습니다.<br>관리자 승인 후 로그인 가능합니다.' });
+            }
+        );
     } catch (e) {
         console.error("Register Error:", e);
         res.json({ status: 'Error', msg: '시스템 오류가 발생했습니다.' });
@@ -1111,7 +1102,15 @@ app.post('/api/file/delete', async (req, res) => {
     if (!user) return res.json({ status: 'Error', msg: '로그인이 필요합니다.' });
 
     const fileId = req.body.fileId;
-    const filePath = path.join(uploadDir, fileId);
+    if (!fileId) return res.json({ status: 'Error', msg: '파일 ID가 없습니다.' });
+
+    // Path Traversal 검증 추가
+    const safePath = path.resolve(uploadDir, fileId);
+    if (!safePath.startsWith(uploadDir + path.sep) && safePath !== uploadDir) {
+        console.warn(`[Security] File Delete Path Traversal Attempt: ${req.ip} - ${fileId}`);
+        return res.json({ status: 'Error', msg: '잘못된 파일 경로입니다.' });
+    }
+    const filePath = safePath;
 
     // [성능 패치 1.1] 파일 삭제 비동기 처리
     try {
