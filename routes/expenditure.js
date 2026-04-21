@@ -474,18 +474,23 @@ router.get('/api/download/*', (req, res) => {
             res.download(safePath);
         });
     }
-    db.get("SELECT applicantEmail, status FROM expenditures WHERE file_paths LIKE ?", [`%${relativePath}%`], async (err, row) => {
-        if (err) return res.status(500).send("시스템 오류");
-        if (!row) {
-            if (user.role !== 'Admin') return res.status(403).send('권한이 없습니다 (문서 정보 없음).');
-        } else {
-            const isPublicStatus  = ['최종결재', '지급완료'].includes(row.status);
-            const isOwnerOrAdmin  = (row.applicantEmail === user.email) || (user.role === 'Admin');
-            const isApprover      = ['사무총장', '총동문회장', '재무국장'].includes(user.position);
-            if (!isPublicStatus && !isOwnerOrAdmin && !isApprover) return res.status(403).send('권한이 없습니다 (결재 진행 중인 타인의 문서).');
+    // 콤마 경계 매칭으로 부분일치 오매칭 방지
+    db.get(
+        "SELECT applicantEmail, status FROM expenditures WHERE ',' || file_paths || ',' LIKE ?",
+        [`%,${relativePath},%`],
+        async (err, row) => {
+            if (err) return res.status(500).send("시스템 오류");
+            if (!row) {
+                if (user.role !== 'Admin') return res.status(403).send('권한이 없습니다 (문서 정보 없음).');
+            } else {
+                const isPublicStatus  = ['최종결재', '지급완료'].includes(row.status);
+                const isOwnerOrAdmin  = (row.applicantEmail === user.email) || (user.role === 'Admin');
+                const isApprover      = ['사무총장', '총동문회장', '재무국장'].includes(user.position);
+                if (!isPublicStatus && !isOwnerOrAdmin && !isApprover) return res.status(403).send('권한이 없습니다 (결재 진행 중인 타인의 문서).');
+            }
+            try { await fs.promises.access(safePath); res.download(safePath); } catch { res.status(404).send('파일 없음'); }
         }
-        try { await fs.promises.access(safePath); res.download(safePath); } catch { res.status(404).send('파일 없음'); }
-    });
+    );
 });
 
 router.post('/api/file/delete', async (req, res) => {
@@ -503,8 +508,11 @@ router.post('/api/file/delete', async (req, res) => {
     }
 
     // [보안] 파일이 속한 문서의 소유자인지 확인
-    db.get("SELECT docNum, file_paths, applicantEmail FROM expenditures WHERE file_paths LIKE ?",
-        [`%${fileId}%`], async (err, row) => {
+    // 콤마 경계 매칭으로 부분일치 오매칭 방지
+    db.get(
+        "SELECT docNum, file_paths, applicantEmail FROM expenditures WHERE ',' || file_paths || ',' LIKE ?",
+        [`%,${fileId},%`],
+        async (err, row) => {
             if (err) return res.json({ status: 'Error', msg: 'DB 조회 실패' });
 
             // 문서가 있으면 소유자 또는 Admin만 삭제 허용
