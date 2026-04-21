@@ -1121,8 +1121,8 @@
 	  document.getElementById('u-pos-sign').innerText = posDisplay;
       //document.getElementById('u-pos-sign').innerText = d.applicantPos || '-';
 
-      if (snap.presName) document.getElementById('info-president').innerText = `${snap.presName} (${snap.presPhone})`;
-      if (snap.secName) document.getElementById('info-secretary').innerText = `${snap.secName} (${snap.secPhone})`;
+      if (snap.presName) document.getElementById('info-president').innerText = snap.presName;
+      if (snap.secName) document.getElementById('info-secretary').innerText = snap.secName;
 
       if (mode === 'VIEW') {
           document.querySelectorAll('input, textarea').forEach(e => e.disabled = true);

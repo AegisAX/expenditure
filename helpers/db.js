@@ -80,25 +80,44 @@ function checkAndMigrateDB() {
             }
         });
 
-        // [통합 마이그레이션] presDate, presidentSignedDate -> executionDate
-        // 기존 DB에 presDate 또는 presidentSignedDate 컬럼이 남아 있는 경우,
-        // executionDate가 비어 있는 행에 한해 값을 복사한다.
-        if (existingNames.includes('presDate')) {
-            db.run(`UPDATE expenditures SET executionDate = presDate
-                    WHERE (executionDate IS NULL OR executionDate = '')
-                      AND presDate IS NOT NULL AND presDate != ''`,
-                (e) => {
-                    if (!e) console.log(">> [DB Migrate] presDate -> executionDate 복사 완료.");
+        // [컬럼 통합 마이그레이션]
+        // presDate, presidentSignedDate -> executionDate 로 통합.
+        // 데이터 복사 후 두 컬럼을 DROP 한다.
+        // secPhone, presPhone 은 코드 어디에서도 읽거나 쓰지 않아 함께 제거한다.
+        // ALTER TABLE ... DROP COLUMN 은 SQLite 3.35.0+ 에서 지원된다.
+        const dropTargets = [
+            {
+                col: 'presDate',
+                before: () => new Promise((resolve) => {
+                    db.run(
+                        `UPDATE expenditures SET executionDate = presDate
+                         WHERE (executionDate IS NULL OR executionDate = '')
+                           AND presDate IS NOT NULL AND presDate != ''`,
+                        (e) => {
+                            if (!e) console.log(">> [DB Migrate] presDate -> executionDate 복사 완료.");
+                            resolve();
+                        }
+                    );
+                }),
+            },
+            { col: 'presidentSignedDate', before: null },
+            { col: 'secPhone',  before: null },
+            { col: 'presPhone', before: null },
+        ];
+
+        (async () => {
+            for (const target of dropTargets) {
+                if (!existingNames.includes(target.col)) continue;
+                if (target.before) await target.before();
+                db.run(`ALTER TABLE expenditures DROP COLUMN ${target.col}`, (e) => {
+                    if (!e) {
+                        console.log(`>> [DB Migrate] 컬럼 삭제 완료: ${target.col}`);
+                    } else {
+                        console.warn(`>> [DB Migrate] 컬럼 삭제 실패(SQLite 3.35+ 필요): ${target.col} -`, e.message);
+                    }
                 });
-        }
-        if (existingNames.includes('presidentSignedDate')) {
-            db.run(`UPDATE expenditures SET executionDate = presidentSignedDate
-                    WHERE (executionDate IS NULL OR executionDate = '')
-                      AND presidentSignedDate IS NOT NULL AND presidentSignedDate != ''`,
-                (e) => {
-                    if (!e) console.log(">> [DB Migrate] presidentSignedDate -> executionDate 복사 완료.");
-                });
-        }
+            }
+        })();
 
         console.log(`>> [DB Check] 검사 완료. (추가된 컬럼: ${added}개)`);
     });
