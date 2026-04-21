@@ -117,7 +117,7 @@ app.use(session({
   store: new SQLiteStore({ db: 'sessions.db', dir: './db', concurrentDB: true }),
   secret: process.env.SESSION_SECRET || 'secret-key-replace-me',
   resave: false, saveUninitialized: false, rolling: true, 
-  cookie: { httpOnly: true, maxAge: 30 * 60 * 1000 }
+  cookie: { httpOnly: true, maxAge: 30 * 60 * 1000, secure: process.env.NODE_ENV === 'production' }
 }));
 
 // [추가] 인증 관련 속도 제한 설정 (Brute Force 방어)
@@ -141,7 +141,7 @@ app.use(csrfProtection);
 app.use((req, res, next) => { res.locals.csrfToken = req.csrfToken(); next(); });
 
 const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'outbound.daouoffice.com',
+    host: process.env.SMTP_HOST || '',
     port: parseInt(process.env.SMTP_PORT) || 465,
     secure: true, 
     auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
@@ -271,8 +271,25 @@ function getSiteUrl() {
   }));
 }
 
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 function makeEmailHtml(docNum, subject, applicant, statusMsg, baseUrl) {
-    return `<div style="padding:20px;border:1px solid #ddd;"><h2>${statusMsg}</h2><p>문서번호: ${docNum}</p><p>제목: ${subject}</p><p>기안자: ${applicant}</p><hr><a href="${baseUrl}/login?docNum=${docNum}">문서 확인</a></div>`;
+    return `<div style="padding:20px;border:1px solid #ddd;">
+        <h2>${escapeHtml(statusMsg)}</h2>
+        <p>문서번호: ${escapeHtml(docNum)}</p>
+        <p>제목: ${escapeHtml(subject)}</p>
+        <p>기안자: ${escapeHtml(applicant)}</p>
+        <hr>
+        <a href="${escapeHtml(baseUrl)}/login?docNum=${encodeURIComponent(docNum || '')}">문서 확인</a>
+    </div>`;
 }
 
 async function sendEmail(to, sub, html) {
