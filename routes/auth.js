@@ -33,7 +33,7 @@ router.post('/api/login', authLimiter, loginValidator, (req, res) => {
             if (cnt >= 5) {
                 db.run("UPDATE users SET login_fail_count = ?, locked_until = ? WHERE id = ?",
                     [cnt, new Date(Date.now() + 30 * 60000).toISOString(), row.id]);
-                res.json({ status: 'Fail', msg: '5회 실패. 15분 잠김.' });
+                res.json({ status: 'Fail', msg: '로그인 5회 실패로 계정이 30분간 잠겼습니다.' });
             } else {
                 db.run("UPDATE users SET login_fail_count = ? WHERE id = ?", [cnt, row.id]);
                 res.json({ status: 'Fail', msg: `정보 불일치 (${cnt}/5)` });

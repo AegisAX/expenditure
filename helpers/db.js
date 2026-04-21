@@ -1,8 +1,9 @@
 const db = require('../database');
 
 function getTodayKST() {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    // 서버 TZ 설정과 무관하게 항상 KST(UTC+9) 기준으로 날짜 반환
+    const d = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    return d.toISOString().slice(0, 10);  // "YYYY-MM-DD"
 }
 
 function getUser(req) {

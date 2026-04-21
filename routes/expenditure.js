@@ -209,9 +209,14 @@ router.post('/api/submit', (req, res, next) => {
 
         db.get("SELECT docNum FROM expenditures WHERE docNum = ?", [finalDocNum], (err, row) => {
             if (row) {
-                db.run("UPDATE expenditures SET subject=?, bodyContent=?, totalAmount=?, reqDate=?, items=?, status=?, file_paths=? WHERE docNum=?",
-                    [f.subject, f.bodyContent, f.totalAmount, finalReqDate, itemsStr, initialStatus, filePathsStr, finalDocNum],
-                    (err) => err ? res.json({ msg: err.message }) : afterSave());
+                db.run(
+                    // [수정] 회수 후 재제출 시 기안자 정보 변경이 반영되도록 appPos·appName·appPhone·appSig 포함
+                    "UPDATE expenditures SET subject=?, bodyContent=?, totalAmount=?, reqDate=?, items=?, status=?, file_paths=?, appPos=?, appName=?, appPhone=?, appSig=? WHERE docNum=?",
+                    [f.subject, f.bodyContent, f.totalAmount, finalReqDate, itemsStr, initialStatus, filePathsStr,
+                    user.position, user.name, user.phone, user.signature_path,
+                    finalDocNum],
+                    (err) => err ? res.json({ msg: err.message }) : afterSave()
+                );
             } else {
                 db.run(`INSERT INTO expenditures (docNum, applicantEmail, subject, bodyContent, totalAmount, reqDate, items, status, appPos, appName, appPhone, appSig, file_paths, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
                     params, (err) => err ? res.json({ msg: "DB 오류: " + err.message }) : afterSave());
