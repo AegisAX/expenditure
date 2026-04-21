@@ -50,7 +50,7 @@ function getNextDocNum(year) {
 function getSiteUrl() {
     return new Promise((resolve) => {
         db.get("SELECT value FROM settings WHERE key = 'site_url'", [], (e, row) => {
-            let url = (row && row.value) ? row.value.trim() : 'http://localhost:8080';
+            let url = (row && row.value) ? row.value.trim() : 'http://localhost:8081';
             if (url.endsWith('/')) url = url.slice(0, -1);
             resolve(url);
         });
