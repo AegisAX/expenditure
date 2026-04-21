@@ -4,30 +4,38 @@ const bcrypt = require('bcryptjs');
 const db = require('../database');
 const { logAction } = require('../helpers/db');
 const { saveFile } = require('../helpers/file');
-const { authLimiter, registerValidator, loginValidator } = require('../middleware/validators');
+const { loginRateLimiter, recordLoginFailure, resetLoginAttempts, registerLimiter, registerValidator, loginValidator } = require('../middleware/validators');
 
 router.get(['/', '/login', '/register'], (req, res) => {
     if (req.session.user) return res.redirect('/list');
     res.render('register', { targetDocNum: req.query.docNum || '' });
 });
 
-router.post('/api/login', authLimiter, loginValidator, (req, res) => {
+router.post('/api/login', loginRateLimiter, loginValidator, (req, res) => {
     const { email, password } = req.body;
     db.get("SELECT * FROM users WHERE email = ?", [email], async (err, row) => {
-        if (err || !row) return res.json({ status: 'Fail', msg: '정보 불일치' });
+        if (err || !row) {
+            recordLoginFailure(req.ip);  // ← 실패 카운트
+            return res.json({ status: 'Fail', msg: '정보 불일치' });
+        }
         if (row.locked_until && new Date(row.locked_until) > new Date()) {
+            // 계정 잠금은 IP 카운터와 무관 — 카운트 증가 안 함
             return res.json({ status: 'Fail', msg: '계정 잠김' });
         }
         if (await bcrypt.compare(password, row.password)) {
+            if (row.status !== 'Approved') {
+                logAction(req, 'LOGIN_FAIL', `미승인 계정 로그인 시도: ${email}`);
+                return res.json({ status: 'Fail', msg: '승인 대기 중' });
+            }
             db.run("UPDATE users SET login_fail_count = 0, locked_until = NULL WHERE id = ?", [row.id]);
-            if (row.status !== 'Approved') return res.json({ status: 'Fail', msg: '승인 대기 중' });
-            // [보안] password 해시를 세션에서 제외
+            resetLoginAttempts(req.ip);  // ← 승인된 사용자만 초기화
             const { password: _pw, ...safeUser } = row;
             req.session.user = safeUser;
             req.session.save();
             logAction(req, 'LOGIN', '로그인 성공');
             res.json({ status: 'Approved', url: '/list' });
         } else {
+            recordLoginFailure(req.ip);  // ← 실패 카운트
             logAction(req, 'LOGIN_FAIL', `실패: ${email}`);
             let cnt = (row.login_fail_count || 0) + 1;
             if (cnt >= 5) {
@@ -42,7 +50,7 @@ router.post('/api/login', authLimiter, loginValidator, (req, res) => {
     });
 });
 
-router.post('/api/register', authLimiter, registerValidator, async (req, res) => {
+router.post('/api/register', registerLimiter, registerValidator, async (req, res) => {
     const { email, password, name, position, phone, generation, signatureFile } = req.body;
     try {
         const existingUser = await new Promise((resolve, reject) => {
