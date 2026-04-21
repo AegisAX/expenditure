@@ -38,7 +38,6 @@ const expenditureValidator = validate([
     body('subject').notEmpty().withMessage('제목을 입력해주세요.').trim(),
     body('bodyContent').notEmpty().withMessage('내용을 입력해주세요.').trim(),
     body('totalAmount').isInt({ min: 0 }).withMessage('금액은 숫자여야 합니다.'),
-    body('executionDate').notEmpty().withMessage('시행일자를 선택해주세요.')
 ]);
 
 module.exports = { authLimiter, registerValidator, loginValidator, expenditureValidator };

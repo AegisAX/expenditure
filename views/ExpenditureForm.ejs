@@ -564,7 +564,7 @@
 			<td rowspan="3" class="sig-box" id="sig-president" style="vertical-align: middle;"></td>
 		  </tr>
 		  <tr><td class="label">시&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;행</td><td class="content-cell">금오총동문회 사무국</td></tr>
-		  <tr><td class="label">시 행 일 자</td><td class="content-cell"><input type="text" id="execDate" value="<%= today %>" disabled placeholder="(승인 시 자동)"></td></tr>
+		  <tr><td class="label">시 행 일 자</td><td class="content-cell"><input type="text" id="execDate" disabled placeholder="(총동문회장 결재 시 자동 설정)"></td></tr>
 		  <tr>
 			<td class="label">지출요청일</td>
 			<td class="content-cell"><input type="text" id="reqDate" disabled placeholder="(제출 시 자동)"></td>
@@ -855,7 +855,7 @@
         formData.append('subject', subj.value);
         formData.append('bodyContent', bodyC.value);
         formData.append('totalAmount', total);
-        formData.append('executionDate', document.getElementById('execDate').value);
+        // executionDate는 총동문회장 결재 시 서버에서 자동 기록 — 클라이언트에서 전송하지 않음
         formData.append('reqDate', initData.reqDate || '');
         formData.append('payDate', initData.payDate || '');
         formData.append('presidentSignedDate', initData.presidentSignedDate || '');

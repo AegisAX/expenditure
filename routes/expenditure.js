@@ -176,10 +176,15 @@ router.post('/api/submit', (req, res, next) => {
         let itemsStr = f.items;
         try { if (typeof f.items !== 'string') itemsStr = JSON.stringify(f.items); } catch(e) { itemsStr = "[]"; }
 
-        const params = [finalDocNum, user.email, f.subject, f.bodyContent, f.totalAmount, f.executionDate, finalReqDate, itemsStr, initialStatus, user.position, user.name, user.phone, user.signature_path, filePathsStr];
+        const params = [finalDocNum, user.email, f.subject, f.bodyContent, f.totalAmount, finalReqDate, itemsStr, initialStatus, user.position, user.name, user.phone, user.signature_path, filePathsStr];
 
         const afterSave = async () => {
             db.run("UPDATE expenditures SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=?", [finalDocNum]);
+            // 총동문회장이 직접 기안·제출한 경우 approve 경로를 거치지 않으므로
+            // 여기서 시행일자를 결재(제출)일로 기록한다.
+            if (initialStatus === '최종결재') {
+                db.run("UPDATE expenditures SET executionDate=? WHERE docNum=?", [getTodayKST(), finalDocNum]);
+            }
             let msg = "제출되었습니다.";
             if (initialStatus === '작성중') msg = "임시저장 되었습니다.";
             else if (initialStatus === '결재중') msg = "제출 및 사무총장 자동 승인 완료 (총동문회장 결재 단계).";
@@ -204,11 +209,11 @@ router.post('/api/submit', (req, res, next) => {
 
         db.get("SELECT docNum FROM expenditures WHERE docNum = ?", [finalDocNum], (err, row) => {
             if (row) {
-                db.run("UPDATE expenditures SET subject=?, bodyContent=?, totalAmount=?, executionDate=?, reqDate=?, items=?, status=?, file_paths=? WHERE docNum=?",
-                    [f.subject, f.bodyContent, f.totalAmount, f.executionDate, finalReqDate, itemsStr, initialStatus, filePathsStr, finalDocNum],
+                db.run("UPDATE expenditures SET subject=?, bodyContent=?, totalAmount=?, reqDate=?, items=?, status=?, file_paths=? WHERE docNum=?",
+                    [f.subject, f.bodyContent, f.totalAmount, finalReqDate, itemsStr, initialStatus, filePathsStr, finalDocNum],
                     (err) => err ? res.json({ msg: err.message }) : afterSave());
             } else {
-                db.run(`INSERT INTO expenditures (docNum, applicantEmail, subject, bodyContent, totalAmount, executionDate, reqDate, items, status, appPos, appName, appPhone, appSig, file_paths, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+                db.run(`INSERT INTO expenditures (docNum, applicantEmail, subject, bodyContent, totalAmount, reqDate, items, status, appPos, appName, appPhone, appSig, file_paths, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
                     params, (err) => err ? res.json({ msg: "DB 오류: " + err.message }) : afterSave());
             }
         });
@@ -282,8 +287,8 @@ router.post('/api/approve', (req, res) => {
                     return res.json({ msg: "처리 중 오류가 발생하여 취소되었습니다." });
                 }
             }
-            db.run("UPDATE expenditures SET docNum=?, status=?, presName=?, presSig=?, presDate=?, presidentSignedDate=?, file_paths=? WHERE docNum=?",
-                [newDocNum, nextStatus, user.name, user.signature_path, todayStr, todayStr, newFilePaths, docNum],
+            db.run("UPDATE expenditures SET docNum=?, status=?, presName=?, presSig=?, presDate=?, presidentSignedDate=?, executionDate=?, file_paths=? WHERE docNum=?",
+                [newDocNum, nextStatus, user.name, user.signature_path, todayStr, todayStr, todayStr, newFilePaths, docNum],
                 async function(err) {
                     if (err) {
                         for (const h of renameHistory) await fs.promises.rename(h.newPath, h.oldPath).catch(() => {});
