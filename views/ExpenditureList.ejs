@@ -136,10 +136,12 @@
         .row-spotlight { background-color: #fff9db !important; border-left: 4px solid #f1c40f; }
         
         /* 테이블 컬럼 기본 너비 (PC 기준) */
-        .col-doc { width: 140px; } 
-        .col-subj { width: auto; }
-        .col-writer { width: 100px; } 
-        .col-stat { width: 80px; }
+        .col-doc   { width: 130px; }
+        .col-exec  { width: 88px; }
+        .col-subj  { width: auto; }
+        .col-writer{ width: 90px; }
+        .col-stat  { width: 72px; }
+        .col-pay   { width: 88px; }
         
         /* [수정] text-align-last 추가로 셀렉트 텍스트 강제 중앙 정렬 */
         .header-select { 
@@ -151,6 +153,17 @@
         .header-select:hover { text-decoration: underline; color: #2c3e50; }
 
         .badge { padding: 5px 0; width: 56px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; display: inline-block; }
+        .date-cell { font-size: 12px; color: #555; white-space: nowrap; }
+        .date-cell.empty { color: #ccc; }
+        .pc-only { display: inline; }
+        .mo-only { display: none; }
+        /* 인라인 날짜: 모바일 전용 — 기본 숨김 */
+        .mo-exec-inline, .mo-pay-inline { display: none; }
+        @media (max-width: 600px) {
+            .date-cell { font-size: 11px; letter-spacing: -0.3px; }
+            .pc-only { display: none; }
+            .mo-only { display: inline; }
+        }
         .st-temp { background-color: #95a5a6; } .st-req { background-color: #3498db; } .st-ing { background-color: #f39c12; }
         .st-done { background-color: #27ae60; } .st-paid { background-color: #2c3e50; } .st-reject { background-color: #e74c3c; }
         
@@ -181,7 +194,13 @@
             .search-btn, .reset-btn { padding: 0 10px; font-size: 12px; height: 40px; }
 
             /* [수정] 너비 70px로 미세 조정 (진한 폰트 대응) */
-            .col-doc { width: 70px; } 
+            .col-doc { width: 70px; }
+            /* 모바일: table-layout auto 전환으로 숨긴 컬럼 공간 완전 제거 */
+            table { table-layout: auto; }
+            .col-exec-th, .col-exec-td,
+            .col-pay-th,  .col-pay-td  { display: none; }
+            .mo-exec-inline { display: block; font-size: 10px; color: #7f8c8d; margin-top: 2px; }
+            .mo-pay-inline  { display: block; font-size: 10px; color: #7f8c8d; margin-top: 3px; }
             
             /* [수정] 접두사: 제목과 동일하게 진하고(bold), 색상(#2c3e50) 맞춤, 크기 12px */
             .doc-prefix { 
@@ -256,31 +275,36 @@
             <table>
                 <colgroup>
                     <col class="col-doc">
-                    <col class="col-subj"> <col class="col-writer">
+                    <col class="col-exec">
+                    <col class="col-subj">
+                    <col class="col-writer">
                     <col class="col-stat">
+                    <col class="col-pay">
                 </colgroup>
                 <thead>
                     <tr>
                         <th>문서번호</th>
+                        <th class="col-exec-th">시행일자</th>
                         <th>제목</th>
                         <th class="col-writer">
                             <select onchange="filterByAuthor(this.value)" class="header-select">
                                 <option value="">기안자</option>
                                 <% authors.forEach(function(a) { %>
                                 <option value="<%= a.appName %>" <%= query.author === a.appName ? 'selected' : '' %>>
-                                    <%= query.author === a.appName ? a.appName : a.appName %>
+                                    <%= a.appName %>
                                 </option>
                                 <% }); %>
                             </select>
                         </th>
                         <th>상태</th>
+                        <th class="col-pay-th">지급일자</th>
                     </tr>
                 </thead>
                 <tbody>
                     <% if(docs.length === 0) { %>
-                        <tr><td colspan="4" style="padding:40px; color:#999;">결재 문서가 없습니다.</td></tr>
+                        <tr><td colspan="6" style="padding:40px; color:#999;">결재 문서가 없습니다.</td></tr>
                     <% } else { %>
-                        <% docs.forEach(function(doc) { 
+                        <% docs.forEach(function(doc) {
                             let badgeClass = 'st-temp';
                             if(doc.status === '제출완료') badgeClass = 'st-req';
                             else if(doc.status === '결재중') badgeClass = 'st-ing';
@@ -296,16 +320,42 @@
                             }
                             if(fullDocNum.startsWith('TEMP-')) { prefix = ''; serial = ''; }
 
+                            function fmtDate(d) {
+                                if (!d) return null;
+                                const m = String(d).match(/(\d{4})-(\d{2})-(\d{2})/);
+                                return m ? { full: d, short: m[2] + '.' + m[3] } : { full: d, short: d };
+                            }
+                            const execDate = fmtDate(doc.executionDate);
+                            const payDate  = fmtDate(doc.payDate);
+
                             let isSpotlight = (doc.applicantEmail === user.email && (doc.status === '작성중' || doc.status === '반려')) ||
                                              (user.position === '사무총장' && doc.status === '제출완료') ||
                                              (user.position === '총동문회장' && doc.status === '결재중') ||
                                              (user.position === '재무국장' && doc.status === '최종결재');
                         %>
 						<tr class="<%= isSpotlight ? 'row-spotlight' : '' %>" onclick="location.href='/form?docNum=<%= doc.docNum %>&page=<%= currentPage %>&keyword=<%= encodeURIComponent(query.keyword || '') %>&author=<%= encodeURIComponent(query.author || '') %>'">
-                            <td style="color:#555;"><span class="doc-prefix"><%= prefix %></span><strong><%= serial %></strong></td>
+                            <td style="color:#555;">
+                                <span class="doc-prefix"><%= prefix %></span><strong><%= serial %></strong>
+                                <% if (execDate) { %><span class="mo-exec-inline"><%= execDate.short %></span><% } %>
+                            </td>
+                            <td class="col-exec-td date-cell <%= execDate ? '' : 'empty' %>">
+                                <% if (execDate) { %>
+                                    <span class="pc-only"><%= execDate.full %></span>
+                                    <span class="mo-only"><%= execDate.short %></span>
+                                <% } else { %>-<% } %>
+                            </td>
                             <td style="text-align:left; font-weight:bold; color:#2c3e50; padding-left:10px;"><%= doc.subject || '(제목 없음)' %></td>
                             <td style="line-height:1.3;"><strong><%= doc.appName || doc.applicantName || '-' %></strong><br><span style="font-size:11px; color:#7f8c8d;"><%= doc.appPos || doc.applicantPos || '' %></span></td>
-                            <td><span class="badge <%= badgeClass %>"><%= doc.status %></span></td>
+                            <td>
+                                <span class="badge <%= badgeClass %>"><%= doc.status %></span>
+                                <% if (payDate) { %><span class="mo-pay-inline"><%= payDate.short %></span><% } %>
+                            </td>
+                            <td class="col-pay-td date-cell <%= payDate ? '' : 'empty' %>">
+                                <% if (payDate) { %>
+                                    <span class="pc-only"><%= payDate.full %></span>
+                                    <span class="mo-only"><%= payDate.short %></span>
+                                <% } else { %>-<% } %>
+                            </td>
                         </tr>
                         <% }); %>
                     <% } %>
