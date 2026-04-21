@@ -114,16 +114,31 @@ docker compose logs web
 
 ```
 .
-├── server.js          # 메인 서버 (라우터, 미들웨어)
-├── database.js        # DB 초기화 및 테이블 정의
-├── views/             # EJS 템플릿
-├── public/            # 정적 파일 (아이콘, PWA 리소스)
-├── db/                # SQLite DB 파일 (gitignore)
-├── uploads/           # 업로드 파일 (gitignore)
+├── server.js              # 앱 설정 및 라우트 마운트
+├── database.js            # DB 초기화 및 테이블 정의
+│
+├── helpers/               # 공통 유틸리티
+│   ├── db.js              # DB 헬퍼 함수 (채번, 락, 감사로그 등)
+│   ├── email.js           # 이메일 발송 및 HTML 생성
+│   └── file.js            # 파일 업로드·저장 (Multer 설정 포함)
+│
+├── middleware/            # Express 미들웨어
+│   ├── auth.js            # 로그인·관리자 권한 체크
+│   └── validators.js      # 입력값 검증 규칙 및 Rate Limiter
+│
+├── routes/                # 라우트 핸들러
+│   ├── auth.js            # 로그인, 회원가입, 로그아웃
+│   ├── expenditure.js     # 문서 조회·제출·결재·잠금·첨부파일
+│   └── admin.js           # 관리자 전용 API
+│
+├── views/                 # EJS 템플릿
+├── public/                # 정적 파일 (아이콘, PWA 리소스)
+├── db/                    # SQLite DB 파일 (gitignore)
+├── uploads/               # 업로드 파일 (gitignore)
 ├── Dockerfile
 ├── docker-compose.yml
-├── .env.example       # 환경변수 템플릿
-└── .env               # 실제 환경변수 (gitignore — 직접 생성 필요)
+├── .env.example           # 환경변수 템플릿
+└── .env                   # 실제 환경변수 (gitignore — 직접 생성 필요)
 ```
 
 ---
