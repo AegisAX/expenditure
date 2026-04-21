@@ -21,7 +21,9 @@ router.post('/api/login', authLimiter, loginValidator, (req, res) => {
         if (await bcrypt.compare(password, row.password)) {
             db.run("UPDATE users SET login_fail_count = 0, locked_until = NULL WHERE id = ?", [row.id]);
             if (row.status !== 'Approved') return res.json({ status: 'Fail', msg: '승인 대기 중' });
-            req.session.user = row;
+            // [보안] password 해시를 세션에서 제외
+            const { password: _pw, ...safeUser } = row;
+            req.session.user = safeUser;
             req.session.save();
             logAction(req, 'LOGIN', '로그인 성공');
             res.json({ status: 'Approved', url: '/list' });

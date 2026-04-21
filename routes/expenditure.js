@@ -233,14 +233,20 @@ router.post('/api/approve', (req, res) => {
         if (!doc) return res.json({ msg: "문서를 찾을 수 없습니다." });
 
         if (action === 'REJECT') {
+            // [보안] 반려는 결재 라인 담당자만 가능
+            const canReject = ['사무총장', '총동문회장'].includes(user.position)
+                            || user.role === 'Admin';
+            if (!canReject) {
+                return res.json({ status: 'Error', msg: '반려 권한이 없습니다.' });
+            }
             logAction(req, 'DOC_REJECT', `문서 반려 처리: ${docNum}`);
             db.run("UPDATE expenditures SET status='반려', locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=?", [docNum], async () => {
-                res.json({ msg: "반려되었습니다." });
+                res.json({ msg: '반려되었습니다.' });
                 if (doc.applicantEmail) {
                     try {
                         const baseUrl = await getSiteUrl();
                         const appInfo = `${doc.appPos || doc.applicantPos} ${doc.appName || doc.applicantName}`;
-                        await sendEmail(doc.applicantEmail, `[반려] ${doc.subject}`, makeEmailHtml(docNum, doc.subject, appInfo, "반려 알림", baseUrl));
+                        await sendEmail(doc.applicantEmail, `[반려] ${doc.subject}`, makeEmailHtml(docNum, doc.subject, appInfo, '반려 알림', baseUrl));
                     } catch(e) {}
                 }
             });
@@ -355,7 +361,10 @@ router.post('/api/profile/update', async (req, res) => {
     db.run(query, params, (err) => {
         if (err) return res.json({ status: 'Error', msg: err.message });
         db.get("SELECT * FROM users WHERE email = ?", [user.email], (err, updatedUser) => {
-            req.session.user = updatedUser;
+            if (updatedUser) {
+                const { password: _pw, ...safeUser } = updatedUser;
+                req.session.user = safeUser;
+            }
             req.session.save();
             logAction(req, 'UPDATE_PROFILE', `본인 정보 수정: ${name}`);
             res.json({ status: 'Success', msg: '수정되었습니다.' });
@@ -436,22 +445,49 @@ router.get('/api/download/*', (req, res) => {
 router.post('/api/file/delete', async (req, res) => {
     const user = req.session.user;
     if (!user) return res.json({ status: 'Error', msg: '로그인이 필요합니다.' });
+
     const fileId = req.body.fileId;
     if (!fileId) return res.json({ status: 'Error', msg: '파일 ID가 없습니다.' });
+
     const safePath = path.resolve(uploadDir, fileId);
     if (!safePath.startsWith(uploadDir + path.sep) && safePath !== uploadDir) {
         console.warn(`[Security] File Delete Path Traversal Attempt: ${req.ip} - ${fileId}`);
         return res.json({ status: 'Error', msg: '잘못된 파일 경로입니다.' });
     }
-    try { await fs.promises.unlink(safePath); } catch (e) { console.error("File Delete Error (Ignored):", e.message); }
-    db.get("SELECT docNum, file_paths FROM expenditures WHERE file_paths LIKE ?", [`%${fileId}%`], (err, row) => {
-        if (err || !row) return res.json({ status: 'Success', msg: '파일이 삭제되었습니다.' });
-        const paths = row.file_paths.split(',').map(s => s.trim()).filter(p => p !== fileId && p !== "");
-        db.run("UPDATE expenditures SET file_paths = ? WHERE docNum = ?", [paths.join(','), row.docNum], (updateErr) => {
-            if (updateErr) return res.json({ status: 'Error', msg: 'DB 업데이트 실패' });
-            res.json({ status: 'Success', msg: '파일 및 DB 기록이 삭제되었습니다.' });
-        });
-    });
+
+    // [보안] 파일이 속한 문서의 소유자인지 확인
+    db.get("SELECT docNum, file_paths, applicantEmail FROM expenditures WHERE file_paths LIKE ?",
+        [`%${fileId}%`], async (err, row) => {
+            if (err) return res.json({ status: 'Error', msg: 'DB 조회 실패' });
+
+            // 문서가 있으면 소유자 또는 Admin만 삭제 허용
+            if (row) {
+                const isOwner = row.applicantEmail === user.email;
+                const isAdmin = user.role === 'Admin';
+                if (!isOwner && !isAdmin) {
+                    console.warn(`[Security] Unauthorized file delete attempt: ${user.email} on ${fileId}`);
+                    return res.json({ status: 'Error', msg: '파일 삭제 권한이 없습니다.' });
+                }
+            }
+
+            // 물리 파일 삭제
+            try {
+                await fs.promises.unlink(safePath);
+            } catch (e) {
+                console.error('File Delete Error (Ignored):', e.message);
+            }
+
+            if (!row) return res.json({ status: 'Success', msg: '파일이 삭제되었습니다.' });
+
+            // DB 기록 갱신
+            const paths = row.file_paths.split(',').map(s => s.trim()).filter(p => p !== fileId && p !== '');
+            db.run("UPDATE expenditures SET file_paths = ? WHERE docNum = ?",
+                [paths.join(','), row.docNum], (updateErr) => {
+                    if (updateErr) return res.json({ status: 'Error', msg: 'DB 업데이트 실패' });
+                    res.json({ status: 'Success', msg: '파일 및 DB 기록이 삭제되었습니다.' });
+                });
+        }
+    );
 });
 
 module.exports = router;
