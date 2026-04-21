@@ -30,7 +30,7 @@ router.get('/list', (req, res) => {
 
         let authClause = "";
         if (user.role !== 'Admin') {
-            authClause = ` AND (applicantEmail = ? OR status IN ('최종결재', '지급완료') OR (status = '제출완료' AND ? = '사무총장') OR (status = '결재중' AND ? = '총동문회장'))`;
+            authClause = ` AND (applicantEmail = ? OR status IN ('최종결재', '지급완료') OR (status = '제출완료' AND ? = '사무총장') OR (status = '결재중' AND ? IN ('총동문회장', '사무총장')))`;
         }
         const countParams = user.role !== 'Admin' ? [...params, user.email, user.position, user.position] : params;
 
