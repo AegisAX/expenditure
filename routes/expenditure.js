@@ -257,7 +257,10 @@ router.post('/api/approve', (req, res) => {
             if (requiredStatus && doc.status !== requiredStatus) {
                 return res.json({ status: 'Error', msg: '현재 결재 단계에서 처리할 수 없는 문서입니다.' });
             }
-        }        
+        }
+        if (action !== 'REJECT' && isOwnDoc && user.role !== 'Admin') {
+            return res.json({ status: 'Error', msg: '본인이 기안한 문서는 직접 결재할 수 없습니다.' });
+        }
 
         if (action === 'REJECT') {
             // [보안] 반려는 결재 라인 담당자만 가능
