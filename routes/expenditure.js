@@ -73,7 +73,6 @@ router.get('/form', async (req, res) => {
     const listPage = req.query.page || 1;
     const listKeyword = req.query.keyword || '';
     const listAuthor = req.query.author || '';
-    const listQueryStr = `page=${listPage}&keyword=${encodeURIComponent(listKeyword)}&author=${encodeURIComponent(listAuthor)}`;
 
     const renderAlertHTML = (msg) => {
         // [보안] 외부 입력값을 JS 문자열에 직접 삽입하지 않고 data 속성을 통해 전달
