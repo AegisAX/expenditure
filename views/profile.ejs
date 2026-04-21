@@ -153,20 +153,9 @@
       <div class="input-row">
         <div style="flex: 1;">
           <label class="input-label">직책</label>
-          <select id="positionSelect" onchange="toggleDirectInput(this)">
-            <option value="" disabled selected>- 선택 -</option>
-            <option value="총동문회장">총동문회장</option>
-            <option value="수석부회장">수석부회장</option>
-            <option value="사무총장">사무총장</option>
-            <option value="기획국장">기획국장</option>
-            <option value="총무국장">총무국장</option>
-            <option value="재무국장">재무국장</option>
-            <option value="편집국장">편집국장</option>
-            <option value="문화국장">문화국장</option>
-            <option value="일반회원">일반회원</option>
-            <option value="DIRECT">직접입력</option>
-          </select>
-          <input type="text" id="positionInput" class="hidden" placeholder="직책 입력" style="margin-top:5px;">
+          <input type="text" id="positionDisplay" readonly
+            style="background:var(--bg-secondary,#f5f5f5);color:#888;cursor:not-allowed;">
+          <div style="font-size:11px;color:#aaa;margin-top:4px;">※ 직책 변경은 관리자에게 문의하세요.</div>
         </div>
         <div style="flex: 1;">
           <label class="input-label">연락처</label>
@@ -243,16 +232,7 @@
         
         if(userData.generation) genSelect.value = userData.generation;
 
-        const posSelect = document.getElementById('positionSelect');
-        const posInput = document.getElementById('positionInput');
-        const options = Array.from(posSelect.options).map(o => o.value);
-        if (options.includes(userData.position)) {
-            posSelect.value = userData.position;
-        } else {
-            posSelect.value = 'DIRECT';
-            posInput.classList.remove('hidden');
-            posInput.value = userData.position || '';
-        }
+        document.getElementById('positionDisplay').value = userData.position || '';
       } catch(e) { console.error("User data load failed", e); }
 
       const canvas = document.getElementById('signature-pad');
@@ -305,12 +285,6 @@
 
     window.clearSignature = function() { if(signaturePad) signaturePad.clear(); };
 
-    window.toggleDirectInput = function(el) {
-      const input = document.getElementById('positionInput');
-      if (el.value === 'DIRECT') { input.classList.remove('hidden'); input.focus(); } 
-      else { input.classList.add('hidden'); input.value = ''; }
-    };
-
     window.autoFormatPhone = function(el) {
       let num = el.value.replace(/[^0-9]/g, '');
       let formatted = '';
@@ -328,12 +302,6 @@
         const name = document.getElementById('name').value.trim();
         const generation = document.getElementById('generation').value;
         const phone = document.getElementById('phone').value.trim();
-        
-        let position = document.getElementById('positionSelect').value;
-        if (position === 'DIRECT') {
-            position = document.getElementById('positionInput').value.trim();
-            if(!position) return Swal.fire('알림', '직책을 입력해주세요.', 'warning');
-        }
 
         if (!name || !generation || !phone) return Swal.fire('알림', '필수 정보를 모두 입력해주세요.', 'warning');
 
@@ -372,7 +340,7 @@
           Swal.fire({ title: '수정 중...', didOpen: () => Swal.showLoading() });
           
           const payload = {
-              name, generation, position, phone,
+              name, generation, phone,
               password: password || undefined 
           };
           

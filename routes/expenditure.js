@@ -338,9 +338,11 @@ router.get('/profile', (req, res) => {
 
 router.post('/api/profile/update', async (req, res) => {
     const user = getUser(req);
-    const { name, generation, position, phone, password, signatureFile } = req.body;
-    let query = "UPDATE users SET name=?, generation=?, position=?, phone=?";
-    let params = [name, generation, position, phone];
+    // [보안] position·role 변경은 관리자 전용(admin.js)에서만 허용.
+    //        본인 수정 API에서는 의도적으로 수신하지 않는다.
+    const { name, generation, phone, password, signatureFile } = req.body;
+    let query = "UPDATE users SET name=?, generation=?, phone=?";
+    let params = [name, generation, phone];
     if (password) { const hash = await bcrypt.hash(password, 10); query += ", password=?"; params.push(hash); }
     if (signatureFile && signatureFile.data) { const fname = await saveFile(signatureFile.data, signatureFile.type, 'SIG'); query += ", signature_path=?"; params.push(fname); }
     query += " WHERE email=?";
