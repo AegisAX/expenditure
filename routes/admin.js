@@ -89,7 +89,8 @@ router.post('/api/admin/user/approve', requireAdmin, (req, res) => {
 });
 
 router.get('/api/admin/users', requireAdmin, (req, res) => {
-    db.all("SELECT * FROM users ORDER BY created_at DESC", [], (err, rows) => res.json(rows || []));
+    db.all("SELECT id, email, name, position, phone, signature_path, status, generation, role, login_fail_count, locked_until, created_at FROM users ORDER BY created_at DESC",
+        [], (err, rows) => res.json(rows || []));
 });
 
 router.get('/api/admin/list', requireAdmin, (req, res) => {

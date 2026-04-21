@@ -143,7 +143,10 @@ router.post('/api/submit', (req, res, next) => {
     const user = getUser(req);
     const f = req.body;
     let finalDocNum = f.docNum || `TEMP-${Date.now()}`;
-    let initialStatus = f.status;
+    // 클라이언트가 보낼 수 있는 status는 '작성중'과 '제출완료'만 허용
+    // 나머지는 서버에서 position 기반으로 결정
+    const ALLOWED_CLIENT_STATUS = ['작성중', '제출완료'];
+    let initialStatus = ALLOWED_CLIENT_STATUS.includes(f.status) ? f.status : '작성중';
     let finalReqDate = f.reqDate || (initialStatus !== '작성중' ? getTodayKST() : "");
 
     if (initialStatus === '제출완료') {
@@ -243,6 +246,19 @@ router.post('/api/approve', (req, res) => {
 
     db.get("SELECT * FROM expenditures WHERE docNum = ?", [docNum], async (err, doc) => {
         if (!doc) return res.json({ msg: "문서를 찾을 수 없습니다." });
+
+        const stageMap = {
+            '사무총장':  '제출완료',
+            '총동문회장': '결재중',
+            '재무국장':  '최종결재',
+        };
+        const isOwnDoc = doc.applicantEmail === user.email;
+        if (action !== 'REJECT' && user.role !== 'Admin' && !isOwnDoc) {
+            const requiredStatus = stageMap[user.position];
+            if (requiredStatus && doc.status !== requiredStatus) {
+                return res.json({ status: 'Error', msg: '현재 결재 단계에서 처리할 수 없는 문서입니다.' });
+            }
+        }        
 
         if (action === 'REJECT') {
             // [보안] 반려는 결재 라인 담당자만 가능
@@ -429,6 +445,7 @@ router.post('/api/recall', (req, res) => {
         [docNum, user.email], function(err) {
             if (err) return res.json({ status: 'Error', msg: err.message });
             if (this.changes === 0) return res.json({ status: 'Error', msg: '회수할 수 없는 상태입니다.' });
+            logAction(req, 'DOC_RECALL', `문서 회수: ${docNum}`);
             res.json({ status: 'Success', msg: '문서가 회수되었습니다.' });
         });
 });
@@ -437,7 +454,7 @@ router.get('/api/download/*', (req, res) => {
     const user = getUser(req);
     const relativePath = req.params[0];
     const safePath = path.resolve(uploadDir, relativePath);
-    if (!safePath.startsWith(uploadDir)) {
+    if (!safePath.startsWith(uploadDir + path.sep) && safePath !== uploadDir) {
         console.warn(`[Security] Path Traversal Attempt Blocked: ${req.ip} - ${relativePath}`);
         return res.status(403).send('잘못된 경로 (Access Denied)');
     }
