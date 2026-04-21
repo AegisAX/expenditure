@@ -8,7 +8,7 @@ const db = require('../database');
 const { uploadDir, upload, saveFile } = require('../helpers/file');
 const { getTodayKST, getUser, getUserByPos, getNextDocNum, getSiteUrl, logAction } = require('../helpers/db');
 const { makeEmailHtml, sendEmail } = require('../helpers/email');
-const { expenditureValidator } = require('../middleware/validators');
+const { expenditureValidator, validatePassword } = require('../middleware/validators');
 
 router.get('/list', (req, res) => {
     const user = getUser(req);
@@ -75,10 +75,17 @@ router.get('/form', async (req, res) => {
     const listAuthor = req.query.author || '';
     const listQueryStr = `page=${listPage}&keyword=${encodeURIComponent(listKeyword)}&author=${encodeURIComponent(listAuthor)}`;
 
-    const renderAlertHTML = (msg) => `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>알림</title>
-        <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    const renderAlertHTML = (msg) => {
+        // [보안] 외부 입력값을 JS 문자열에 직접 삽입하지 않고 data 속성을 통해 전달
+        const safeMsg      = msg.replace(/'/g, "\\'").replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const safeKeyword  = encodeURIComponent(listKeyword);
+        const safeAuthor   = encodeURIComponent(listAuthor);
+        const safePage     = parseInt(listPage) || 1;
+        return `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>알림</title>
+        <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"><\/script>
         <style>body{background-color:#f0f2f5;}</style></head><body>
-        <script>document.addEventListener("DOMContentLoaded",function(){Swal.fire({icon:'warning',title:'접근 제한',text:'${msg}',confirmButtonText:'목록으로 돌아가기',confirmButtonColor:'#3085d6',allowOutsideClick:false,allowEscapeKey:false}).then(()=>{location.replace('/list?${listQueryStr}');});});</script></body></html>`;
+        <script>document.addEventListener("DOMContentLoaded",function(){Swal.fire({icon:'warning',title:'접근 제한',text:'${safeMsg}',confirmButtonText:'목록으로 돌아가기',confirmButtonColor:'#3085d6',allowOutsideClick:false,allowEscapeKey:false}).then(()=>{location.replace('/list?page=${safePage}&keyword=${safeKeyword}&author=${safeAuthor}');});});<\/script></body></html>`;
+    };
 
     let address = "주소 설정 필요";
     let presInfo = { name: "미지정", phone: "" };
@@ -359,7 +366,14 @@ router.post('/api/profile/update', async (req, res) => {
     const { name, generation, phone, password, signatureFile } = req.body;
     let query = "UPDATE users SET name=?, generation=?, phone=?";
     let params = [name, generation, phone];
-    if (password) { const hash = await bcrypt.hash(password, 10); query += ", password=?"; params.push(hash); }
+    if (password) {
+        // [수정] 비밀번호 복잡도 검증
+        const pwErr = validatePassword(password);
+        if (pwErr) return res.json({ status: 'Error', msg: pwErr });
+        const hash = await bcrypt.hash(password, 10);
+        query += ", password=?";
+        params.push(hash);
+    }
     if (signatureFile && signatureFile.data) { const fname = await saveFile(signatureFile.data, signatureFile.type, 'SIG'); query += ", signature_path=?"; params.push(fname); }
     query += " WHERE email=?";
     params.push(user.email);

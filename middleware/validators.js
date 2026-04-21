@@ -20,9 +20,27 @@ const validate = (validations) => async (req, res, next) => {
     return res.json({ status: 'Fail', msg: errors.array()[0].msg });
 };
 
+// [추가] 공통 비밀번호 복잡도 검증 함수 (세 곳에서 재사용)
+function validatePassword(password) {
+    if (!password || password.length < 8)
+        return '비밀번호는 8자 이상이어야 합니다.';
+    if (!/[a-zA-Z]/.test(password))
+        return '비밀번호에 영문자를 포함해야 합니다.';
+    if (!/[0-9]/.test(password))
+        return '비밀번호에 숫자를 포함해야 합니다.';
+    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password))
+        return '비밀번호에 특수문자를 포함해야 합니다.';
+    return null;  // null = 통과
+}
+
 const registerValidator = validate([
     body('email').isEmail().withMessage('유효한 이메일을 입력해주세요.').normalizeEmail(),
-    body('password').isLength({ min: 6 }).withMessage('비밀번호는 6자 이상이어야 합니다.'),
+    // [수정] 단순 길이 체크 → 복잡도 검증 함수로 교체
+    body('password').custom(value => {
+        const err = validatePassword(value);
+        if (err) throw new Error(err);
+        return true;
+    }),
     body('name').notEmpty().withMessage('이름을 입력해주세요.').trim(),
     body('phone').matches(/^010-\d{3,4}-\d{4}$/).withMessage('전화번호 형식이 잘못되었습니다.'),
     body('position').notEmpty().withMessage('직책을 선택해주세요.').trim(),
@@ -40,4 +58,4 @@ const expenditureValidator = validate([
     body('totalAmount').isInt({ min: 0 }).withMessage('금액은 숫자여야 합니다.'),
 ]);
 
-module.exports = { authLimiter, registerValidator, loginValidator, expenditureValidator };
+module.exports = { authLimiter, registerValidator, loginValidator, expenditureValidator, validatePassword };

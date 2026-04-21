@@ -57,7 +57,15 @@ router.post('/api/admin/user/update', requireAdmin, (req, res) => {
         if (oldUser.generation != generation) changes.push(`대수: ${oldUser.generation} -> ${generation}`);
         if (oldUser.status != status) changes.push(`상태: ${oldUser.status} -> ${status}`);
         if (oldUser.role != role) changes.push(`권한: ${oldUser.role} -> ${role}`);
-        if (newPassword) { const hash = await bcrypt.hash(newPassword, 10); query += ", password=?"; params.push(hash); changes.push("비밀번호: 변경됨"); }
+        if (newPassword) {
+            // [수정] 비밀번호 복잡도 검증
+            const pwErr = validatePassword(newPassword);
+            if (pwErr) return res.json({ status: 'Error', msg: pwErr });
+            const hash = await bcrypt.hash(newPassword, 10);
+            query += ", password=?";
+            params.push(hash);
+            changes.push("비밀번호: 변경됨");
+        }
         if (signatureFile && signatureFile.data) { const fname = await saveFile(signatureFile.data, signatureFile.type, 'SIG'); query += ", signature_path=?"; params.push(fname); changes.push("서명: 변경됨"); }
         query += " WHERE id=?";
         params.push(id);

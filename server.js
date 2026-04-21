@@ -23,7 +23,7 @@ app.use(compression());
 
 const cspDirectives = {
     defaultSrc:  ["'self'"],
-    scriptSrc:   ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
+    scriptSrc:   ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
     scriptSrcAttr: ["'unsafe-inline'"],
     styleSrc:    ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
     imgSrc:      ["'self'", "data:", "blob:"],
