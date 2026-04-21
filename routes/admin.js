@@ -7,6 +7,7 @@ const db = require('../database');
 const { logAction } = require('../helpers/db');
 const { uploadDir, saveFile } = require('../helpers/file');
 const { requireAdmin } = require('../middleware/auth');
+const { validatePassword } = require('../middleware/validators');
 
 router.get('/admin', requireAdmin, (req, res) => res.render('admin'));
 
