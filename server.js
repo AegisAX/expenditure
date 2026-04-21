@@ -67,6 +67,14 @@ app.use('/', authRoutes);
 app.use('/', requireLogin, expenditureRoutes);
 app.use('/', requireLogin, adminRoutes);
 
+// /api/* 는 404 JSON 으로 분리, 나머지만 /login 으로 리다이렉트
+app.use('/api', (req, res) => {
+    res.status(404).json({
+        status: 'Error',
+        msg: 'API 경로를 찾을 수 없습니다.',
+        path: req.originalUrl
+    });
+});
 app.use((req, res) => res.redirect('/login'));
 
 app.use((err, req, res, next) => {
