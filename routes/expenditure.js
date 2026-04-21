@@ -219,8 +219,15 @@ router.post('/api/submit', (req, res, next) => {
         db.get("SELECT docNum FROM expenditures WHERE docNum = ?", [finalDocNum], (err, row) => {
             if (row) {
                 db.run(
-                    // [수정] 회수 후 재제출 시 기안자 정보 변경이 반영되도록 appPos·appName·appPhone·appSig 포함
-                    "UPDATE expenditures SET subject=?, bodyContent=?, totalAmount=?, reqDate=?, items=?, status=?, file_paths=?, appPos=?, appName=?, appPhone=?, appSig=? WHERE docNum=?",
+                    // [수정] 회수·반려 후 재제출 시 기안자 정보 및 이전 결재자 흔적 초기화
+                    //        이전 결재자 서명(secSig/presSig 등)이 DB에 잔존해 감사 트레일이 오염되는 문제를 해결
+                    "UPDATE expenditures SET \
+                        subject=?, bodyContent=?, totalAmount=?, reqDate=?, items=?, status=?, file_paths=?, \
+                        appPos=?, appName=?, appPhone=?, appSig=?, \
+                        secName=NULL, secSig=NULL, secDate=NULL, \
+                        presName=NULL, presSig=NULL, executionDate=NULL, \
+                        payDate=NULL \
+                     WHERE docNum=?",
                     [f.subject, f.bodyContent, f.totalAmount, finalReqDate, itemsStr, initialStatus, filePathsStr,
                     user.position, user.name, user.phone, user.signature_path,
                     finalDocNum],
