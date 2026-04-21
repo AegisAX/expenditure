@@ -22,16 +22,26 @@ function getUserByPos(position) {
 
 function getNextDocNum(year) {
     return new Promise((resolve, reject) => {
-        db.serialize(() => {
-            db.run("BEGIN IMMEDIATE", (err) => { if (err) return reject(err); });
-            db.run("INSERT OR IGNORE INTO doc_sequences (year, last_seq) VALUES (?, 0)", [year]);
-            db.run("UPDATE doc_sequences SET last_seq = last_seq + 1 WHERE year = ?", [year], function(err) {
-                if (err) { db.run("ROLLBACK"); return reject(err); }
-            });
-            db.get("SELECT last_seq FROM doc_sequences WHERE year = ?", [year], (err, row) => {
-                if (err || !row) { db.run("ROLLBACK"); return reject(err || new Error("채번 실패")); }
-                db.run("COMMIT");
-                resolve(`사무국-${year}-${String(row.last_seq).padStart(4, '0')}`);
+        // [수정] 각 단계를 콜백 체인으로 명시적 순서 보장
+        //        중간 실패 시 반드시 ROLLBACK 후 reject
+        db.run("BEGIN IMMEDIATE", (err) => {
+            if (err) return reject(err);
+
+            db.run("INSERT OR IGNORE INTO doc_sequences (year, last_seq) VALUES (?, 0)", [year], (err) => {
+                if (err) return db.run("ROLLBACK", () => reject(err));
+
+                db.run("UPDATE doc_sequences SET last_seq = last_seq + 1 WHERE year = ?", [year], (err) => {
+                    if (err) return db.run("ROLLBACK", () => reject(err));
+
+                    db.get("SELECT last_seq FROM doc_sequences WHERE year = ?", [year], (err, row) => {
+                        if (err || !row) return db.run("ROLLBACK", () => reject(err || new Error("채번 실패")));
+
+                        db.run("COMMIT", (err) => {
+                            if (err) return db.run("ROLLBACK", () => reject(err));
+                            resolve(`사무국-${year}-${String(row.last_seq).padStart(4, '0')}`);
+                        });
+                    });
+                });
             });
         });
     });
@@ -48,7 +58,8 @@ function getSiteUrl() {
 }
 
 function clearStaleLocks() {
-    const timeout = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    // [수정] lock acquire/form 체크와 동일한 3분 기준으로 통일
+    const timeout = new Date(Date.now() - 3 * 60 * 1000).toISOString();
     db.run("UPDATE expenditures SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE locked_at < ?", [timeout]);
 }
 

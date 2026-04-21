@@ -77,4 +77,21 @@ app.use((err, req, res, next) => {
 setTimeout(checkAndMigrateDB, 1000);
 setInterval(clearStaleLocks, 10 * 60 * 1000);
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+
+    // [추가] SMTP 설정 누락 경고
+    const smtpRequired = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS'];
+    const smtpMissing  = smtpRequired.filter(key => !process.env[key]);
+    if (smtpMissing.length > 0) {
+        console.warn('⚠️  [Mail Warning] 다음 SMTP 환경변수가 설정되지 않아 이메일 알림이 발송되지 않습니다:');
+        console.warn(`    누락 항목: ${smtpMissing.join(', ')}`);
+        console.warn('    .env 파일에서 SMTP 설정을 확인해주세요.');
+    }
+
+    // [추가] SESSION_SECRET 기본값 사용 경고
+    if (!process.env.SESSION_SECRET) {
+        console.warn('⚠️  [Security Warning] SESSION_SECRET이 설정되지 않았습니다.');
+        console.warn('    기본값(secret-key-replace-me)이 사용 중입니다. 반드시 .env에서 변경하세요.');
+    }
+});
