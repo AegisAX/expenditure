@@ -463,7 +463,8 @@ router.get('/api/download/*', (req, res) => {
     const user = getUser(req);
     const relativePath = req.params[0];
     const safePath = path.resolve(uploadDir, relativePath);
-    if (!safePath.startsWith(uploadDir + path.sep) && safePath !== uploadDir) {
+    const rel = path.relative(uploadDir, safePath);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
         console.warn(`[Security] Path Traversal Attempt Blocked: ${req.ip} - ${relativePath}`);
         return res.status(403).send('잘못된 경로 (Access Denied)');
     }
@@ -495,7 +496,8 @@ router.post('/api/file/delete', async (req, res) => {
     if (!fileId) return res.json({ status: 'Error', msg: '파일 ID가 없습니다.' });
 
     const safePath = path.resolve(uploadDir, fileId);
-    if (!safePath.startsWith(uploadDir + path.sep) && safePath !== uploadDir) {
+    const rel = path.relative(uploadDir, safePath);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {    
         console.warn(`[Security] File Delete Path Traversal Attempt: ${req.ip} - ${fileId}`);
         return res.json({ status: 'Error', msg: '잘못된 파일 경로입니다.' });
     }
