@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="csrf-token" content="<%= csrfToken %>">
+    <title>전자결재 목록</title>
+    
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#ffffff">
+    <link rel="apple-touch-icon" href="/icons/icon-192x192.png">
+
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/service-worker.js')
+            .then(reg => console.log('Service Worker registered.', reg))
+            .catch(err => console.log('Service Worker registration failed.', err));
+        });
+      }
+
+    // [PWA] 당겨서 새로고침 (Pull-to-Refresh) 활성화
+    document.addEventListener('DOMContentLoaded', function() {
+        PullToRefresh.init({
+            mainElement: '.container', 
+            triggerElement: 'body',    
+            onRefresh: function() {
+                window.location.reload(); 
+            },
+            distThreshold: 70,        
+            distMax: 90,              
+            distReload: 60,           
+            iconArrow: '&#8675;',     
+            iconRefreshing: '&hellip;', 
+            instructionsPullToRefresh: '당겨서 새로고침',
+            instructionsReleaseToRefresh: '놓아서 새로고침',
+            instructionsRefreshing: '새로고침 중...'
+        });
+    });
+    
+    // [보안] 브라우저 종료/재실행 감지 및 로그아웃
+    window.addEventListener('load', function() {
+        const isLogin = sessionStorage.getItem('is_login');
+        
+        if (!isLogin && document.cookie.includes('connect.sid')) { 
+             if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
+                 fetch('/api/logout').then(() => {
+                     window.location.href = '/login';
+                 });
+             }
+        }
+        
+        if (window.location.pathname !== '/login') {
+            sessionStorage.setItem('is_login', 'true');
+        }
+    });
+    </script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pulltorefreshjs/0.1.22/index.umd.min.js"></script>
+    
+    <style>
+        /* === [PWA 네이티브 앱 느낌 최적화] === */
+        body {
+          padding-top: calc(10px + env(safe-area-inset-top)); 
+          padding-bottom: calc(10px + env(safe-area-inset-bottom));
+          padding-left: calc(env(safe-area-inset-left));
+          padding-right: calc(env(safe-area-inset-right));
+          
+          -webkit-overflow-scrolling: touch;
+          overscroll-behavior-y: none;
+          user-select: none; -webkit-user-select: none;
+          -webkit-tap-highlight-color: transparent;
+        }
+
+        input, textarea, select { user-select: text; -webkit-user-select: text; }
+
+        /* 1. 기본 스타일 */
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Malgun Gothic", sans-serif; padding: 20px; background-color: #f0f2f5; margin: 0; }
+        
+        .container { 
+            max-width: 900px; margin: 0 auto; 
+            background-color: #fff; padding: 20px; 
+            border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); 
+        }
+        
+        /* 2. 헤더 스타일 (Sticky 적용) */
+        .header { 
+            display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; 
+            
+            position: sticky; top: 0; z-index: 100;
+            background-color: #ffffff; /* 흰색 배경 */
+            border-bottom: 1px solid #e1e4e8; /* 하단 구분선 */
+            
+            margin: -20px -20px 20px -20px; 
+            padding: 20px 20px 15px 20px; /* 내부 패딩 재설정 */
+            
+            gap: 15px; 
+        }
+        
+        .header-title h2 { margin: 0; color: #2c3e50; font-size: 20px; font-weight: 800; }
+        .header-title span { font-size: 13px; color: #7f8c8d; }
+
+        /* 사용자 정보 영역 */
+        .user-info { 
+            display: flex; align-items: center; justify-content: space-between; gap: 10px; 
+            background: #f8f9fa; padding: 8px 12px; border-radius: 8px; border: 1px solid #eee; width: 100%; 
+        }
+        
+        .user-text { display: flex; flex-direction: column; justify-content: center; line-height: 1.3; cursor: pointer; padding: 2px 5px; border-radius: 6px; transition: 0.2s; flex-shrink: 0; }
+        .user-text:hover { background-color: rgba(0,0,0,0.05); }
+        .user-name { font-weight: bold; font-size: 14px; color: #2c3e50; }
+        .user-pos { font-size: 11px; color: #7f8c8d; }
+
+        .btn-group { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
+        .nav-btn { padding: 6px 10px; border: 1px solid #dee2e6; background-color: white; color: #495057; border-radius: 6px; cursor: pointer; font-size: 11px; font-weight: bold; text-decoration: none; display: flex; align-items: center; transition: 0.2s; white-space: nowrap; }
+        .nav-btn:hover { background-color: #f8f9fa; border-color: #ced4da; }
+        .nav-btn.pc-write { background-color: #2c3e50; color: white; border-color: #2c3e50; }
+        .nav-btn.logout { color: #e74c3c; border-color: #e74c3c; }
+
+        /* 3. 검색 섹션 */
+        .search-section { background: #fff; padding: 15px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #eee; box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
+        .search-row { display: flex; gap: 8px; align-items: center; width: 100%; }
+        .search-input { flex: 1; height: 42px; padding: 0 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; background-color: #fcfcfc; min-width: 0; outline: none; }
+        .search-btn, .reset-btn { height: 42px; padding: 0 15px; border-radius: 8px; font-size: 13px; font-weight: bold; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+        .search-btn { background: #2c3e50; color: white; border: none; }
+        .reset-btn { background: #f8f9fa; color: #495057; border: 1px solid #dee2e6; text-decoration: none; }
+
+        /* 4. 테이블 스타일 */
+        .table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: fixed; }
+        th, td { padding: 12px 4px; text-align: center; border-bottom: 1px solid #eee; font-size: 13px; vertical-align: middle; }
+        th { background-color: #f8f9fa; color: #495057; font-weight: bold; }
+        tr:hover { background-color: #f1f3f5; cursor: pointer; }
+        .row-spotlight { background-color: #fff9db !important; border-left: 4px solid #f1c40f; }
+        
+        /* 테이블 컬럼 기본 너비 (PC 기준) */
+        .col-doc { width: 140px; } 
+        .col-subj { width: auto; }
+        .col-writer { width: 100px; } 
+        .col-stat { width: 80px; }
+        
+        /* [수정] text-align-last 추가로 셀렉트 텍스트 강제 중앙 정렬 */
+        .header-select { 
+            background: transparent; border: none; font-size: 13px; font-weight: bold; color: #495057; 
+            cursor: pointer; text-align: center; width: 100%; outline: none; appearance: none; 
+            text-align-last: center; 
+            padding: 0; 
+        }
+        .header-select:hover { text-decoration: underline; color: #2c3e50; }
+
+        .badge { padding: 5px 0; width: 56px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; display: inline-block; }
+        .st-temp { background-color: #95a5a6; } .st-req { background-color: #3498db; } .st-ing { background-color: #f39c12; }
+        .st-done { background-color: #27ae60; } .st-paid { background-color: #2c3e50; } .st-reject { background-color: #e74c3c; }
+        
+        .pagination { display: flex; justify-content: center; gap: 5px; margin-top: 20px; padding-bottom: 20px; }
+        .page-link { padding: 8px 12px; border: 1px solid #dee2e6; background: #fff; color: #2c3e50; text-decoration: none; border-radius: 4px; font-size: 13px; }
+        .page-link.active { background: #2c3e50; color: #fff; border-color: #2c3e50; }
+
+        .write-btn { position: fixed; bottom: 30px; right: 30px; width: 60px; height: 60px; border-radius: 50%; background-color: #2c3e50; color: white; border: none; box-shadow: 0 4px 15px rgba(0,0,0,0.3); cursor: pointer; display: flex; justify-content: center; align-items: center; font-size: 30px; z-index: 100; transition: transform 0.2s; }
+
+        @media (max-width: 600px) {
+            body { padding: 10px; }
+            .container { padding: 15px 10px; border-radius: 8px; }
+            
+            .header {
+                margin: -15px -10px 10px -10px;
+                padding: 15px 10px 10px 10px;
+            }
+
+            .header-title { width: 100%; display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+            
+            .user-info { flex-wrap: nowrap; padding: 6px 10px; }
+            .btn-group { gap: 3px; }
+            .nav-btn { padding: 5px 7px; font-size: 10px; }
+
+            .search-section { padding: 10px; }
+            .search-row { gap: 4px; flex-wrap: nowrap; }
+            .search-input { font-size: 13px; padding: 0 8px; }
+            .search-btn, .reset-btn { padding: 0 10px; font-size: 12px; height: 40px; }
+
+            /* [수정] 너비 70px로 미세 조정 (진한 폰트 대응) */
+            .col-doc { width: 70px; } 
+            
+            /* [수정] 접두사: 제목과 동일하게 진하고(bold), 색상(#2c3e50) 맞춤, 크기 12px */
+            .doc-prefix { 
+                display: block;        
+                font-size: 12px;       /* 11px -> 12px */
+                font-weight: bold;     /* normal -> bold */
+                color: #2c3e50;        /* #888 -> #2c3e50 */
+                white-space: nowrap;   
+                margin-bottom: 0px;
+                line-height: 1.2;
+                letter-spacing: -0.5px;
+            }
+            
+            /* [수정] 일련번호: 제목과 동일하게 진하고(bold), 크기 12px */
+            .col-doc strong { 
+                display: block;       
+                font-size: 12px;      /* 11px -> 12px */
+                font-weight: bold;
+                color: #2c3e50;       /* 혹시 모를 상속 문제 방지용 명시 */
+                line-height: 1.2;
+                margin-top: 0px;
+                letter-spacing: -0.5px;
+            }
+            
+            .col-writer { width: 60px; }
+            .col-writer span { display: none; } 
+            
+            .col-stat { width: 55px; }
+            .badge { width: 45px; font-size: 10px; padding: 4px 0; }
+            
+            .col-subj { width: auto; }
+
+            .write-btn { width: 50px; height: 50px; font-size: 24px; bottom: 20px; right: 20px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="header">
+            <div class="header-title">
+                <h2>전자결재 목록</h2>
+                <span>금오공고 총동문회</span>
+            </div>
+            
+            <div class="user-info">
+                <div class="user-text" onclick="location.href='/profile'" title="정보 수정">
+                    <span class="user-name"><%= user.name %>님</span>
+                    <span class="user-pos"><%= user.position %></span>
+                </div>
+                <div class="btn-group">
+                    <% if (user.role === 'Admin') { %>
+                        <a href="/admin" class="nav-btn" style="color:#2980b9; border-color:#2980b9;">관리자</a>
+                    <% } %>
+					<a href="/form?page=<%= currentPage %>&keyword=<%= encodeURIComponent(query.keyword || '') %>&author=<%= encodeURIComponent(query.author || '') %>" class="nav-btn pc-write">+ 신규작성</a>
+                    <a href="/api/logout" class="nav-btn logout">로그아웃</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="search-section">
+            <form action="/list" method="GET" id="searchForm">
+                <div class="search-row">
+                    <input type="text" name="keyword" class="search-input" placeholder="제목 또는 내용으로 검색" value="<%= query.keyword || '' %>">
+                    <button type="submit" class="search-btn">검색</button>
+                    <a href="/list" class="reset-btn">초기화</a>
+                </div>
+            </form>
+        </div>
+
+        <div class="table-wrapper">
+            <table>
+                <colgroup>
+                    <col class="col-doc">
+                    <col class="col-subj"> <col class="col-writer">
+                    <col class="col-stat">
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th>문서번호</th>
+                        <th>제목</th>
+                        <th class="col-writer">
+                            <select onchange="filterByAuthor(this.value)" class="header-select">
+                                <option value="">기안자</option>
+                                <% authors.forEach(function(a) { %>
+                                <option value="<%= a.appName %>" <%= query.author === a.appName ? 'selected' : '' %>>
+                                    <%= query.author === a.appName ? a.appName : a.appName %>
+                                </option>
+                                <% }); %>
+                            </select>
+                        </th>
+                        <th>상태</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% if(docs.length === 0) { %>
+                        <tr><td colspan="4" style="padding:40px; color:#999;">결재 문서가 없습니다.</td></tr>
+                    <% } else { %>
+                        <% docs.forEach(function(doc) { 
+                            let badgeClass = 'st-temp';
+                            if(doc.status === '제출완료') badgeClass = 'st-req';
+                            else if(doc.status === '결재중') badgeClass = 'st-ing';
+                            else if(doc.status === '최종결재') badgeClass = 'st-done';
+                            else if(doc.status === '지급완료') badgeClass = 'st-paid';
+                            else if(doc.status === '반려') badgeClass = 'st-reject';
+
+                            let fullDocNum = doc.docNum || '';
+                            let prefix = ''; let serial = fullDocNum;
+                            if(fullDocNum.includes('-')) {
+                                const parts = fullDocNum.split('-');
+                                serial = parts.pop(); prefix = parts.join('-') + '-';
+                            }
+                            if(fullDocNum.startsWith('TEMP-')) { prefix = ''; serial = ''; }
+
+                            let isSpotlight = (doc.applicantEmail === user.email && (doc.status === '작성중' || doc.status === '반려')) ||
+                                             (user.position === '사무총장' && doc.status === '제출완료') ||
+                                             (user.position === '총동문회장' && doc.status === '결재중') ||
+                                             (user.position === '재무국장' && doc.status === '최종결재');
+                        %>
+						<tr class="<%= isSpotlight ? 'row-spotlight' : '' %>" onclick="location.href='/form?docNum=<%= doc.docNum %>&page=<%= currentPage %>&keyword=<%= encodeURIComponent(query.keyword || '') %>&author=<%= encodeURIComponent(query.author || '') %>'">
+                            <td style="color:#555;"><span class="doc-prefix"><%= prefix %></span><strong><%= serial %></strong></td>
+                            <td style="text-align:left; font-weight:bold; color:#2c3e50; padding-left:10px;"><%= doc.subject || '(제목 없음)' %></td>
+                            <td style="line-height:1.3;"><strong><%= doc.appName || doc.applicantName || '-' %></strong><br><span style="font-size:11px; color:#7f8c8d;"><%= doc.appPos || doc.applicantPos || '' %></span></td>
+                            <td><span class="badge <%= badgeClass %>"><%= doc.status %></span></td>
+                        </tr>
+                        <% }); %>
+                    <% } %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <% if (totalPages > 1) { %>
+    <div class="pagination">
+        <% if (currentPage > 1) { %>
+            <a href="/list?page=<%= currentPage - 1 %>&keyword=<%= query.keyword %>&author=<%= query.author %>" class="page-link">이전</a>
+        <% } %>
+        <% for (let i = 1; i <= totalPages; i++) { %>
+            <a href="/list?page=<%= i %>&keyword=<%= query.keyword %>&author=<%= query.author %>" class="page-link <%= i === currentPage ? 'active' : '' %>"><%= i %></a>
+        <% } %>
+        <% if (currentPage < totalPages) { %>
+            <a href="/list?page=<%= currentPage + 1 %>&keyword=<%= query.keyword %>&author=<%= query.author %>" class="page-link">다음</a>
+        <% } %>
+    </div>
+    <% } %>
+
+    <button class="write-btn" onclick="location.href='/form?page=<%= currentPage %>&keyword=<%= encodeURIComponent(query.keyword || '') %>&author=<%= encodeURIComponent(query.author || '') %>' ">+</button>
+
+    <script>
+        function filterByAuthor(val) {
+            const url = new URL(window.location.href);
+            if (val) url.searchParams.set('author', val);
+            else url.searchParams.delete('author');
+            url.searchParams.set('page', '1');
+            window.location.href = url.toString();
+        }
+    </script>
+</body>
+</html>

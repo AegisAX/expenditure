@@ -1,0 +1,1309 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="csrf-token" content="<%= csrfToken %>">
+  <title>지출결의서</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#2c3e50">
+  <link rel="apple-touch-icon" href="/icons/icon-192x192.png">
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js')
+          .then(reg => console.log('Service Worker registered.', reg))
+          .catch(err => console.log('Service Worker registration failed.', err));
+      });
+    }
+
+    // [PWA] 당겨서 새로고침 (Pull-to-Refresh) 활성화
+    document.addEventListener('DOMContentLoaded', function() {
+        PullToRefresh.init({
+            mainElement: '#form-content', // [수정] .page -> #form-content (타이틀 분리)
+            triggerElement: 'body',       // 터치는 화면 전체에서 감지
+            onRefresh: function() {
+                window.location.reload(); 
+            },
+            distThreshold: 70,        
+            distMax: 90,              
+            distReload: 60,           
+            iconArrow: '&#8675;',     
+            iconRefreshing: '&hellip;', 
+            instructionsPullToRefresh: '당겨서 새로고침',
+            instructionsReleaseToRefresh: '놓아서 새로고침',
+            instructionsRefreshing: '새로고침 중...'
+        });
+    });
+	
+	// [보안] 브라우저 종료 후 재접속 시 로그아웃 처리
+    // sessionStorage는 탭/브라우저가 닫히면 데이터가 사라짐
+    window.addEventListener('load', function() {
+        const isLogin = sessionStorage.getItem('is_login');
+        
+        // 로그인 상태라고 서버는 판단하지만(쿠키 살아있음), 브라우저는 닫혔던 적이 있다면(세션 스토리지 비어있음)
+        if (!isLogin && document.cookie.includes('connect.sid')) { 
+             // 단, 로그인 페이지나 가입 페이지는 제외
+             if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
+                 fetch('/api/logout').then(() => {
+                     window.location.href = '/login';
+                 });
+             }
+        }
+        
+        // 로그인 성공 후나, 정상적인 페이지 이동 시에는 플래그 설정
+        if (window.location.pathname !== '/login') {
+            sessionStorage.setItem('is_login', 'true');
+        }
+    });
+  </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pulltorefreshjs/0.1.22/index.umd.min.js"></script>
+  <style>
+	/* === [PWA 네이티브 앱 느낌 최적화] === */
+    
+    /* 1. 노치 및 하단 홈바 대응 (Safe Area) */
+    body {
+      /* 기존 padding 설정에 더해 safe-area를 추가 */
+      padding-top: calc(10px + env(safe-area-inset-top)); 
+      padding-bottom: calc(10px + env(safe-area-inset-bottom));
+      padding-left: calc(env(safe-area-inset-left));
+      padding-right: calc(env(safe-area-inset-right));
+      
+      /* 스크롤 부드럽게 */
+      -webkit-overflow-scrolling: touch;
+      /* 당겨서 새로고침 시 브라우저 기본 효과 제거 (라이브러리 사용 위해) */
+      overscroll-behavior-y: none;
+      /* 텍스트 선택 방지 (앱처럼 느끼게 함, 입력창 제외) */
+      user-select: none;
+      -webkit-user-select: none;
+      /* 터치 시 파란색 하이라이트 제거 */
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* 입력창은 텍스트 선택 가능해야 함 */
+    input, textarea {
+      user-select: text;
+      -webkit-user-select: text;
+    }
+
+    /* [수정] 상단 헤더 Sticky 처리 및 디자인 개선 */
+    .header-area, .main-title {
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        
+        /* [핵심 수정] 배경색을 회색(#f0f2f5)에서 흰색(#ffffff)으로 변경 */
+        background-color: #ffffff; 
+        
+        /* [추가] 스크롤 시 본문과 구분되도록 하단 테두리 추가 */
+        border-bottom: 1px solid #e1e4e8; 
+        
+        /* [추가] 타이틀 주변 여백 정리 (깔끔하게 보이도록) */
+        margin: -10px -8px 10px -8px; /* page padding을 상쇄하여 꽉 차게 만듦 */
+        padding: 15px 0; /* 내부 여백 확보 */
+    }
+	
+
+    /* === [v11.44] 스타일 유지 === */
+    * { box-sizing: border-box; }
+    
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Malgun Gothic", sans-serif; 
+      padding: 20px; 
+      background-color: #f0f2f5; 
+      color: #333; 
+      line-height: 1.4; 
+      margin: 0;
+    }
+
+    #splash-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #2c3e50; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 9999; }
+    .loader { border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin-bottom: 20px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .loading-text { color: white; font-size: 18px; font-weight: bold; }
+    
+    .page { 
+      width: 100%; 
+      max-width: 850px; 
+      margin: 0 auto; 
+      padding: 30px; 
+      background-color: #fff; 
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1); 
+      border-radius: 8px;
+    }
+    
+    .main-title { font-size: 24px; font-weight: bold; text-align: center; margin-bottom: 30px; text-decoration: underline; text-underline-offset: 5px; word-break: keep-all; }
+    
+    table { width: 100%; border-collapse: collapse; margin-bottom: 10px; table-layout: fixed; border: 1px solid #000; }
+    th, td { border: 1px solid #000; padding: 0; font-size: 13px; word-break: break-all; }
+    
+    input, textarea { 
+      width: 100%; 
+      border: none; 
+      font-family: inherit; 
+      font-size: 14px; 
+      outline: none; 
+      background: transparent; 
+      padding: 5px; 
+      border-radius: 0; 
+      -webkit-appearance: none; 
+    }
+    textarea { resize: none; display: block; line-height: 1.5; }
+    
+    input:read-only, textarea:read-only { color: #555; cursor: default; }
+    input:disabled, textarea:disabled { background-color: transparent; color: #333; -webkit-text-fill-color: #333; opacity: 1; }
+
+    .label { font-weight: bold; text-align: center; background-color: #f8f9fa; vertical-align: middle; }
+    .content-cell { text-align: left; padding: 5px !important; vertical-align: middle; }
+    .txt-center { text-align: center; }
+    .txt-right { text-align: right; }
+    
+    .processor-table { margin-bottom: 15px; }
+    .processor-header { width: 50px; font-weight: bold; text-align: center; font-size: 14px; }
+    .processor-content { padding: 10px; font-size: 12px; line-height: 1.6; text-align: left; }
+    
+    .col-label { width: 18%; } .col-data { width: 32%; } .col-mid-label { width: 5%; } .col-sig { width: 15%; }
+    .sig-box { height: 90px; text-align: center; vertical-align: middle; }
+    .sig-img { max-width: 90%; max-height: 80px; object-fit: contain; }
+    .role-cell { height: 30px; font-weight: bold; text-align: center !important; font-size: 12px; }
+    
+    .table-scroll-wrapper { width: 100%; overflow-x: auto; margin-bottom: 10px; -webkit-overflow-scrolling: touch; }
+    .item-table { min-width: 600px; }
+    .item-table th { font-size: 12px; text-align: center; height: 30px; background-color: #f8f9fa; white-space: nowrap; }
+    .item-table td { text-align: center; padding: 4px; vertical-align: middle; }
+    .item-table textarea { min-height: 32px; font-size: 13px; }
+    
+    .btn-area { text-align: right; padding: 10px 0; }
+    .add-btn { background: #27ae60; color: white; border: none; padding: 10px 15px; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 14px; }
+    .del-btn { background: #e74c3c; color: white; border: none; padding: 4px 8px; cursor: pointer; border-radius: 3px; font-size: 12px; margin-left: 3px; }
+    
+    .bottom-btn-group { 
+      margin-top: 30px; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; padding-bottom: 40px; 
+    }
+    .bottom-btn-group button { 
+      padding: 12px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; border: none; font-size: 15px; flex: 1 1 auto; min-width: 100px; max-width: 200px; transition: opacity 0.2s;
+    }
+    .bottom-btn-group button:active { opacity: 0.8; }
+
+    .submit-btn { background: #2c3e50; color: white; }
+    .temp-btn { background: #95a5a6; color: white; }
+    .list-btn { background: #7f8c8d; color: white; }
+    .approve-btn { background: #2980b9; color: white; }
+    .reject-btn { background: #c0392b; color: white; }
+    .print-btn { background: #16a085; color: white; }
+    
+    #file-list, #new-file-list { font-size: 13px; color: #555; margin-top: 8px; }
+    .file-item { margin-bottom: 6px; display: flex; align-items: center; flex-wrap: wrap; }
+    .file-link { margin-right: 10px; color: #2980b9; text-decoration: none; font-weight: bold; word-break: break-all; }
+    .file-del-btn { background: #e74c3c; color: white; border: none; border-radius: 3px; padding: 4px 8px; cursor: pointer; font-size: 12px; margin-left: 5px; }
+    
+    #print-image-container { display: none; }
+    .print-only-div { display: none; white-space: pre-wrap; word-break: break-all; padding: 5px; font-size: 14px; line-height: 1.5; text-align: left; }
+
+    /* [PC 기본 설정] */
+    .item-table input::placeholder, 
+    .item-table textarea::placeholder { color: transparent; }
+    
+    /* 증빙자료 라벨 기본 너비 (PC) */
+    .attach-label { width: 130px; } 
+	
+	/* [추가] 상세 내용 입력란 자동 높이 조절용 스타일 */
+    #bodyContent {
+      overflow-y: hidden; /* 스크롤바 숨김 */
+      resize: none;       /* 수동 크기 조절 비활성 */
+      min-height: 150px;  /* 최소 높이 설정 */
+    }
+	
+	/* [수정] 미리보기 모달 스타일 (화면 정중앙 고정) */
+    .modal-overlay { 
+        position: fixed; 
+        top: 0; 
+        left: 0; 
+        width: 100%; 
+        height: 100%; 
+        background: rgba(0,0,0,0.7); /* 배경 어둡게 */
+        display: none; 
+        justify-content: center; /* 가로 중앙 정렬 */
+        align-items: center;     /* 세로 중앙 정렬 */
+        z-index: 9999;           /* 최상단 레이어 */
+        backdrop-filter: blur(2px); /* 배경 흐림 효과 (선택사항) */
+    }
+
+    .modal-content {
+        background: white;
+        width: 90%; 
+        max-width: 800px; 
+        height: 80vh; 
+        display: flex; 
+        flex-direction: column; 
+        padding: 0;
+        border-radius: 12px;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        overflow: hidden; /* 내부 내용 넘침 방지 */
+        animation: slideUp 0.3s ease-out; /* 등장 애니메이션 */
+    }
+
+    @keyframes slideUp {
+        from { transform: translateY(20px); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+    }
+    
+    /* PDF iframe 스크롤 관성 (iOS) */
+    #previewFrame {
+        -webkit-overflow-scrolling: touch;
+        overflow-y: scroll;
+    }
+
+    /* === [모바일 최적화 스타일: 전체 글자 크기 축소] === */
+    @media screen and (max-width: 600px) {
+      /* 1. 전체 레이아웃 */
+      body { padding: 5px 0; background-color: #f0f2f5; }
+      .page { padding: 10px 8px; width: 100%; border-radius: 0; }
+      
+      /* [수정] 메인 타이틀 크기 대폭 축소 (24px -> 16px) */
+      .main-title { 
+        font-size: 16px; 
+        margin-bottom: 10px; 
+        font-weight: 700;
+      }
+      
+      /* [수정] 기본 테이블 글자 크기 축소 (13px -> 11px) */
+      table, th, td { font-size: 11px !important; }
+      
+      /* [수정] 입력창 글자 크기 전체 축소 */
+      input, textarea, select { 
+        font-size: 12px !important; /* 가독성 마지노선 */
+        letter-spacing: -0.5px; 
+        padding: 4px !important; /* 패딩도 줄임 */
+      }
+      
+      /* [수정] 제목 입력칸(#subject) 특별 처리 */
+      #subject {
+        font-size: 12px !important;
+        letter-spacing: -0.5px;
+        font-weight: bold;
+      }
+
+      /* [수정] 상단 결재선(처리자) 영역 축소 */
+      .processor-header { width: 35px; font-size: 11px; }
+      .processor-content { font-size: 11px; padding: 5px; }
+      #u-info-line { font-size: 11px; display: block; margin-top: 2px; }
+
+      /* [수정] 라벨(회색 배경) 폰트 축소 */
+      .label { 
+        font-size: 11px; 
+        padding: 2px; 
+        letter-spacing: -0.5px; 
+        line-height: 1.2;
+      }
+      .col-label { width: 20%; } /* 라벨 너비도 약간 줄임 */
+
+      /* 결재 도장 박스 */
+      .sig-box { height: 50px; } /* 높이 축소 */
+      .role-cell { height: 20px; font-size: 10px; }
+      .sig-img { max-height: 45px; }
+      
+      /* 증빙자료 영역 */
+      .attach-label { width: 50px !important; font-size: 11px; padding: 2px !important; }
+      #att-guide-text { font-size: 10px; }
+      .file-link { font-size: 11px; }
+
+      /* 버튼 */
+      .bottom-btn-group { padding: 0 5px; margin-top: 15px; }
+      .bottom-btn-group button { max-width: none; width: 48%; margin-bottom: 5px; font-size: 13px; padding: 10px 0; }
+
+      /* ========================================= */
+      /* [집행내역] 10-Column Grid (3열 배치) - 컴팩트 버전 */
+      /* ========================================= */
+      
+      .item-table { min-width: 0 !important; width: 100% !important; display: block; border: none; }
+      .item-table tbody { display: block; width: 100%; }
+      .item-table thead { display: none; }
+
+      /* [Row] 카드 박스 */
+      .item-table tr.item-row {
+        display: grid;
+        grid-template-columns: repeat(10, 1fr);
+        gap: 4px 4px; /* 간격을 매우 좁게 설정 */
+        
+        background: #fff;
+        border: 1px solid #e1e4e8;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        padding: 8px 6px; /* 패딩 축소 */
+        margin-bottom: 8px;
+      }
+
+      /* [Cell] */
+      .item-table td {
+        display: flex;
+        align-items: center;
+        padding: 0;
+        border: none;
+        width: auto !important;
+      }
+
+      /* [라벨] 집행내역 내부 라벨 */
+      .item-table tbody td::before {
+        content: attr(data-label); 
+        flex-shrink: 0;
+        font-size: 10px; /* 아주 작게 */
+        font-weight: bold;
+        color: #666;
+        margin-right: 3px;
+        white-space: nowrap;
+      }
+
+      /* [입력창] 집행내역 내부 */
+      .item-table textarea, .item-table input {
+        flex: 1;
+        background-color: #f8f9fa;
+        border: 1px solid #ced4da;
+        border-radius: 3px;
+        padding: 2px 2px; /* 패딩 최소화 */
+        width: 100%;
+        height: 28px; /* 높이 축소 */
+        margin: 0;
+        box-sizing: border-box;
+        text-align: center;
+        font-size: 11px !important; /* 내부 글자 11px */
+      }
+      .item-table textarea { padding-top: 4px; resize: none; overflow: hidden; text-align: left; }
+
+      /* --- [배치 로직] --- */
+
+      /* 1. 연번 & 삭제 */
+      .item-table tbody td:nth-of-type(1) {
+        grid-column: span 10;
+        justify-content: space-between;
+        border-bottom: 1px solid #f0f0f0;
+        padding-bottom: 4px;
+        margin-bottom: 2px;
+        font-weight: 800;
+        color: #2c3e50;
+        font-size: 12px;
+      }
+      .item-table tbody td:nth-of-type(1)::before { content: "No."; color: #888; font-weight: normal; font-size: 11px; }
+
+      /* 2. 품명 */
+      .item-table tbody td:nth-of-type(2) { grid-column: span 10; }
+      .item-table tbody td:nth-of-type(2)::before { content: "품명"; }
+
+      /* 3. 단가 (4칸) */
+      .item-table tbody td:nth-of-type(3) { grid-column: span 4; }
+      .item-table tbody td:nth-of-type(3)::before { content: "단가"; }
+      .item-table tbody td:nth-of-type(3) input { text-align: right; }
+
+      /* 4. 수량 (2칸) */
+      .item-table tbody td:nth-of-type(4) { grid-column: span 2; }
+      .item-table tbody td:nth-of-type(4)::before { content: "수량"; margin-right: 1px; font-size: 10px; }
+      .item-table tbody td:nth-of-type(4) input { text-align: center; padding: 2px 0; }
+
+      /* 5. 금액 (4칸) */
+      .item-table tbody td:nth-of-type(5) { grid-column: span 4; }
+      .item-table tbody td:nth-of-type(5)::before { content: "금액"; color: #2980b9; }
+      .item-table tbody td:nth-of-type(5) input {
+        background-color: #e8f4fc;
+        color: #1864ab;
+        font-weight: bold;
+        text-align: right;
+        border-color: #a5d8ff;
+      }
+
+      /* 6. 채주 (5칸) */
+      .item-table tbody td:nth-of-type(6) { grid-column: span 5; }
+      .item-table tbody td:nth-of-type(6)::before { content: "채주"; }
+      .item-table tbody td:nth-of-type(6) textarea { font-size: 11px; text-align: center; }
+
+      /* 7. 지급방법 (5칸) */
+      .item-table tbody td:nth-of-type(7) { grid-column: span 5; }
+      .item-table tbody td:nth-of-type(7)::before { content: "지급"; }
+      .item-table tbody td:nth-of-type(7) textarea { text-align: center; }
+
+      /* 모바일용 Placeholder */
+      .item-table input::placeholder, 
+      .item-table textarea::placeholder {
+        color: #adb5bd;
+        font-size: 10px;
+        font-weight: normal;
+        letter-spacing: -0.5px;
+      }
+
+      /* 삭제 버튼 */
+      .del-btn { padding: 2px 6px; font-size: 10px; background-color: #ff6b6b; color: white; border-radius: 8px; border: none; margin-left: auto; }
+
+      /* 하단 합계바 (Footer) */
+      .item-table tfoot { display: block; margin-top: 10px; }
+      .item-table tfoot tr { 
+        display: flex; 
+        align-items: center; 
+        justify-content: space-between;
+        background: #343a40; 
+        color: white; 
+        padding: 8px 10px; /* 패딩 축소 */
+        border-radius: 6px; 
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      }
+      .item-table tfoot td { width: auto; padding: 0; background: transparent !important; border: none; color: white; }
+      .item-table tfoot td::before { display: none !important; }
+
+      /* "합계 금액" 텍스트 */
+      .item-table tfoot td:first-child { flex: 0 0 auto; font-size: 13px; font-weight: bold; text-align: left; margin-right: 10px; }
+      
+      /* 합계 금액 숫자 */
+      .item-table tfoot td:nth-child(2) { flex: 1; display: flex; justify-content: flex-end; }
+      .item-table tfoot td:nth-child(2) input { 
+        background: transparent; 
+        border: none; 
+        color: #ffec99 !important; 
+        -webkit-text-fill-color: #ffec99 !important;
+        opacity: 1 !important;
+        font-size: 16px; /* 숫자 크기 약간 축소 */
+        font-weight: 800; 
+        text-align: right; 
+        padding: 0;
+        height: auto;
+      }
+      .item-table tfoot td:nth-child(3) { display: none; }
+    }
+
+    @media print { 
+      @page { size: A4; margin: 0; }
+      html, body { width: 210mm; height: 100%; margin: 0; padding: 0; background-color: white; -webkit-print-color-adjust: exact; }
+      .page { width: 210mm; min-height: 296mm; padding: 15mm; box-sizing: border-box; border: none; margin: 0; page-break-after: auto; box-shadow: none; }
+      #bodyContent { display: none !important; }
+      #print-body-content-view { display: block !important; }
+      textarea { height: auto !important; overflow: visible !important; }
+      .processor-content { font-size: 11px !important; padding: 5px !important; white-space: nowrap; }
+      .submit-btn, .list-btn, .temp-btn, .approve-btn, .reject-btn, .print-btn, .btn-area, .del-btn, .file-del-btn, #file-input-wrapper, #new-file-area, #att-guide-text { display: none !important; }
+      .file-link { text-decoration: none; color: black; pointer-events: none; }
+      #print-image-container.visible { display: block !important; width: 100%; margin: 0; padding: 0; }
+      .print-att-box { page-break-before: always; break-before: page; width: 210mm; height: 296mm; box-sizing: border-box; padding: 15mm; display: flex; flex-direction: column; justify-content: center; align-items: center; border: none; margin: 0; overflow: hidden; }
+      .print-att-label { font-weight: bold; font-size: 14px; margin-bottom: 10px; display: block; width: 100%; text-align: left; }
+      .print-att-img { max-width: 100%; max-height: 250mm; object-fit: contain; display: block; box-shadow: none; }
+      .table-scroll-wrapper { overflow: visible; display: block; }
+      .item-table { min-width: 100%; width: 100%; }
+      .content-cell { height: auto !important; }
+	  .slash-mark { color: #bbb !important; -webkit-print-color-adjust: exact; }
+	  .slash-mark { color: #888 !important; -webkit-print-color-adjust: exact; }
+    }
+	
+	/* 사선(/) 표시용 스타일 보완 */
+	.slash-mark {
+	  font-size: 32px;
+	  color: #ddd;
+	  font-weight: 200;
+	  user-select: none;
+	  display: flex;        /* [변경] flex로 중앙 정렬 */
+	  align-items: center;  /* [추가] 세로 중앙 */
+	  justify-content: center; /* [추가] 가로 중앙 */
+	  height: 100%;
+	}
+	@media screen and (max-width: 600px) {
+	  .slash-mark { font-size: 24px; }
+	}
+  </style>
+</head>
+<body>
+  <div id="splash-screen"><div class="loader"></div><div class="loading-text">문서 불러오는 중...</div></div>
+  <script type="application/json" id="initData"><%- initDataJSON %></script>
+
+  <div class="page">
+    <div class="main-title">회비 집행 및 지출결의서</div>
+    
+	<div id="form-content"> 
+		<table class="processor-table">
+		  <tr>
+			<td class="processor-header label">처<br>리<br>자</td>
+			<td class="processor-content">
+			  <div><%= address %></div>
+			  <div style="margin-top:5px;">
+				총동문회장 : <span id="info-president"><%= president %></span> &nbsp;&nbsp; 
+				사무총장 : <span id="info-secretary"><%= secretary %></span> &nbsp;&nbsp;
+				<span id="u-info-line"></span>
+			  </div>
+			</td>
+		  </tr>
+		</table>
+
+		<table>
+		  <colgroup>
+			<col class="col-label">
+			<col class="col-data">
+			<col class="col-mid-label">
+			<col class="col-sig">
+			<col class="col-sig">
+			<col class="col-sig">
+		  </colgroup>
+		  
+		  <tr>
+			<td colspan="2" class="label" style="border-bottom: none;">[ 예산집행의 품의 ]</td>
+			<td rowspan="4" class="label">결<br><br>재</td>
+			<td class="role-cell"><span id="u-pos-sign"></span></td>
+			<td class="role-cell">사무총장</td>
+			<td class="role-cell">총동문회장</td>
+		  </tr>
+		  <tr>
+			<td class="label">문 서 번 호</td>
+			<td class="content-cell">
+			  <input type="hidden" id="trackingDocNum" value="<%= docNum %>">
+			  <input type="text" id="docNum" value="<%= docNum %>" readonly placeholder="(제출 시 자동 생성)">
+			</td>
+			<td rowspan="3" class="sig-box" id="sig-applicant" style="vertical-align: middle;">
+			  <% if (user.position === '사무총장' || user.position === '총동문회장') { %>
+				<div class="slash-mark">/</div>
+			  <% } %>
+			</td>
+			<td rowspan="3" class="sig-box" id="sig-secretary" style="vertical-align: middle;">
+			  <% if (user.position === '총동문회장') { %>
+				<div class="slash-mark">/</div>
+			  <% } %>
+			</td>
+			<td rowspan="3" class="sig-box" id="sig-president" style="vertical-align: middle;"></td>
+		  </tr>
+		  <tr><td class="label">시&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;행</td><td class="content-cell">금오총동문회 사무국</td></tr>
+		  <tr><td class="label">시 행 일 자</td><td class="content-cell"><input type="text" id="execDate" value="<%= today %>" disabled placeholder="(승인 시 자동)"></td></tr>
+		  <tr>
+			<td class="label">지출요청일</td>
+			<td class="content-cell"><input type="text" id="reqDate" disabled placeholder="(제출 시 자동)"></td>
+			<td colspan="2" class="label">지 급 일 자</td>
+			<td colspan="2" class="content-cell"><input type="text" id="payDate" disabled placeholder="(지급 시 자동)"></td>
+		  </tr>
+		  <tr>
+			<td class="label">제&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;목</td>
+			<td colspan="5" class="content-cell"><input type="text" id="subject" placeholder="지출 제목을 입력하세요." style="font-weight: bold;"></td>
+		  </tr>
+		</table>
+
+		<table style="border-top: none;">
+		  <tr>
+			  <td class="content-cell" style="padding: 15px; vertical-align: top; min-height: 180px;">
+				  <textarea id="bodyContent" rows="10" placeholder="지출 목적 및 상세 내용을 입력하세요." oninput="autoResize(this)"></textarea>
+				  <div id="print-body-content-view" class="print-only-div"></div>
+			  </td>
+		  </tr>
+		</table>
+
+		<div style="font-weight: bold; margin: 20px 0 8px 5px;">[ 집행내역 ]</div>
+		
+		<div class="table-scroll-wrapper">
+		  <table id="itemTable" class="item-table">
+			<colgroup>
+				<col style="width: 40px;">
+				<col style="width: 180px;">
+				<col style="width: 80px;">
+				<col style="width: 50px;">
+				<col style="width: 90px;">
+				<col style="width: 120px;">
+				<col style="width: 70px;">
+			</colgroup>
+			<thead>
+			  <tr>
+				<th rowspan="2">연번</th><th colspan="4">지출내역</th><th colspan="2">채주(지급처)</th>
+			  </tr>
+			  <tr>
+				<th>품명</th><th>단가</th><th>수량</th><th>금액</th><th>상호명(성명)</th><th>지급방법</th>
+			  </tr>
+			</thead>
+			<tbody id="itemBody"></tbody>
+			<tfoot>
+			  <tr style="height: 30px;">
+				<td colspan="4" class="label">합 계 금 액</td>
+				<td class="txt-right" style="padding-right: 5px;"><input type="text" id="grandTotal" class="txt-right" readonly style="font-weight:bold; color:blue;"></td>
+				<td colspan="2" style="background-color:#f8f9fa;"></td>
+			  </tr>
+			</tfoot>
+		  </table>
+		</div>
+		
+		<div class="btn-area" id="add-btn-area"><button class="add-btn" type="button" onclick="window.addRow()">+ 내역 추가</button></div>
+
+		<table>
+		  <tr>
+			<td class="label attach-label" style="height: 60px;">증빙자료</td>
+			<td colspan="3" class="content-cell" style="padding: 10px; font-size: 12px; line-height: 1.6;">
+			  <span id="att-guide-text">별첨 : 증빙 서류를 첨부해 주세요. (다중 선택 가능)</span>
+			  <div id="file-list"></div>
+			  <div id="new-file-area" style="margin-top:5px; display:none;">
+				<input type="file" id="attachment" multiple accept="image/*, application/pdf" onchange="window.handleFileSelect(this)">
+				<div id="new-file-list" style="color:blue;"></div>
+			  </div>
+			</td>
+		  </tr>
+		</table>
+		
+		<div class="bottom-btn-group" id="form-buttons"></div>
+	</div>
+  </div>
+  
+  <div id="print-image-container"></div>
+
+  <div id="previewModal" class="modal-overlay" style="display:none; z-index: 9999;">
+    <div class="modal-content" style="width:95%; max-width:800px; height:80vh; display:flex; flex-direction:column; padding:0;">
+      <div class="modal-header" style="padding:15px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
+        <span id="previewTitle" style="font-weight:bold; font-size:16px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">파일 미리보기</span>
+        <button onclick="closePreview()" style="border:none; background:none; font-size:24px; cursor:pointer;">&times;</button>
+      </div>
+      
+      <div class="modal-body" style="flex:1; overflow:auto; padding:0; background:#f0f0f0; position:relative; display:flex; justify-content:center; align-items:center;">
+        
+        <div id="previewContainer" style="width:100%; height:100%; display:flex; justify-content:center; align-items:center; overflow:auto;"></div>
+        
+        <div id="previewMsg" style="display:none; position:absolute; color:#666; font-weight:bold;">불러오는 중...</div>
+      </div>
+
+      <div class="modal-footer" style="padding:10px; text-align:center; border-top:1px solid #eee;">
+        <a id="downloadBtn" href="#" download class="print-btn" style="text-decoration:none; padding:10px 20px; font-size:14px; display:inline-block;">원본 다운로드</a>
+        <button onclick="closePreview()" class="temp-btn" style="padding:10px 20px; font-size:14px;">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    if (typeof pdfjsLib !== 'undefined') {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+    }
+
+    async function callApi(url, data) {
+        try {
+            const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            const res = await fetch(url, { 
+                method: 'POST', 
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'CSRF-Token': token 
+                }, 
+                body: JSON.stringify(data) 
+            });
+            return await res.json();
+        } catch (err) { 
+            console.error(err); 
+            Swal.fire('통신 오류', '서버와 통신 중 오류가 발생했습니다.', 'error'); 
+            throw err; 
+        }
+    }
+
+    const mode = "<%= mode %>";
+    const myName = "<%= user.name %>";
+    const myPos = "<%= user.position %>";
+    const myPhone = "<%= user.phone %>";
+    const myEmail = "<%= user.email %>";
+	
+	// [추가] 서버에서 전달받은 목록 페이지 상태 변수 저장
+    const listPage = "<%= listPage %>";
+    const listKeyword = "<%= listKeyword %>";
+    const listAuthor = "<%= listAuthor %>";
+
+    let initData = {};
+    let existingFiles = [];
+    let newFilesQueue = [];
+
+    function formatNum(n) { if(!n) return ""; return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+    function unformatNum(s) { return parseFloat(s.toString().replace(/,/g, '')) || 0; }
+    function autoResize(el) { el.style.height = 'auto'; el.style.height = (el.scrollHeight) + 'px'; }
+
+    try { initData = JSON.parse(document.getElementById('initData').textContent); } catch(e) {}
+
+    window.onload = function() {
+      try {
+        if (initData.attachmentIds) existingFiles = initData.attachmentIds.split(',').map(s=>s.trim()).filter(s=>s);
+        
+        if (initData.docNum) {
+			// [개선] 작성 중이거나 결재 대기 중인 문서(수정/결재 가능 상태)일 때만 Lock 실행
+			const isMutableStatus = !['최종결재', '지급완료'].includes(initData.status);
+    
+			if (isMutableStatus) {
+				const acquireLock = () => {
+					callApi('/api/lock/acquire', { docNum: initData.docNum }).then(res => {
+						if (res.status === 'Locked' || res.status === 'Recalled') {
+							Swal.fire({
+								icon: 'warning',
+								title: '접근 불가',
+								text: res.msg,
+								confirmButtonText: '목록으로',
+								allowOutsideClick: false,
+								allowEscapeKey: false
+							}).then(() => {
+								window.location.href = '/list';
+							});
+						} 
+					}).catch(e => console.error("Lock heartbeat fail", e));
+				};
+				acquireLock();
+				const lockInterval = setInterval(acquireLock, 60000);
+
+				// 페이지 종료 시 Lock 해제 이벤트 등록
+				window.addEventListener('pagehide', () => {
+					clearInterval(lockInterval);
+					releaseLock();
+				});
+			}
+        }
+
+        const releaseLock = () => {
+            if (initData.docNum) {
+                const url = '/api/lock/release';
+                const data = JSON.stringify({ docNum: initData.docNum });
+                const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+                
+                fetch(url, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'CSRF-Token': token
+                    },
+                    body: data,
+                    keepalive: true 
+                }).catch(err => console.error("Lock release fail:", err));
+            }
+        };
+
+        window.addEventListener('pagehide', releaseLock);
+        window.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') releaseLock();
+        });
+
+        if (mode === "WRITE") {
+          if (initData.docNum && initData.status) { 
+            window.initViewMode(initData);
+            enableEditMode();
+          } else { 
+            window.addRow();
+            document.getElementById('u-info-line').innerText = `${myPos} : ${myName} (${myPhone})`;
+            document.getElementById('u-pos-sign').innerText = myPos;
+            enableEditMode();
+          }
+          setTimeout(() => document.getElementById('subject').focus(), 600);
+        } else if (mode === "VIEW") {
+          window.initViewMode(initData);
+          renderViewButtons();
+        }
+      } catch (err) { console.error(err); }
+      finally { setTimeout(() => { document.getElementById('splash-screen').style.display='none'; }, 500); }
+    };
+
+    function enableEditMode() {
+        document.querySelectorAll('input:not(#docNum):not(#execDate):not(#reqDate):not(#payDate), textarea').forEach(e => e.disabled = false);
+        document.getElementById('add-btn-area').style.display = 'block';
+        document.getElementById('new-file-area').style.display = 'block';
+        document.querySelectorAll('.file-del-btn').forEach(btn => btn.style.display = 'inline-block');
+        document.querySelectorAll('.del-btn').forEach(btn => btn.style.display = 'inline-block');
+        const guide = document.getElementById('att-guide-text'); if(guide) guide.style.display = 'inline';
+        document.getElementById('sig-applicant').innerHTML = ''; 
+        document.getElementById('sig-secretary').innerHTML = '';
+        document.getElementById('sig-president').innerHTML = '';
+        document.getElementById('form-buttons').innerHTML = `<button class="temp-btn" onclick="submitForm('작성중')">임시저장</button><button class="submit-btn" onclick="submitForm('제출완료')">제출(신청)</button><button class="list-btn" onclick="goList()">목록</button>`;
+    }
+
+    function renderViewButtons() {
+        let html = "";
+        let canSign = false;
+        if (myPos === "사무총장" && initData.status === "제출완료") canSign = true;
+        if (myPos === "총동문회장" && initData.status === "결재중") canSign = true;
+        if (myPos === "재무국장" && initData.status === "최종결재") canSign = true;
+        
+        const isMyDoc = (initData.applicantEmail === myEmail);
+        const recallableStatus = ['제출완료', '결재중'].includes(initData.status);
+
+        if (isMyDoc && recallableStatus) html += `<button class="temp-btn" style="background:#d35400;" onclick="recallDoc()">문서 회수 (수정)</button> `;
+        if (initData.status === "지급완료") html += `<button class="print-btn" onclick="printDoc()">인쇄 / PDF 저장</button> `;
+        if (canSign) {
+            html += `<button class="approve-btn" onclick="processApprove('APPROVE')">${myPos === '재무국장' ? '지급 완료(승인)' : '승인(결재)'}</button>`;
+            if (myPos !== '재무국장') html += ` <button class="reject-btn" onclick="processApprove('REJECT')">반려</button>`;
+        }
+        html += ` <button class="list-btn" onclick="unlockAndGoList()">목록</button>`;
+        document.getElementById('form-buttons').innerHTML = html;
+    }
+
+    window.submitForm = function(status) { 
+        const subj = document.getElementById('subject');
+        if(!subj.value.trim()) return Swal.fire({ icon: 'warning', title: '입력 누락', text: '제목을 입력해주세요.' }).then(() => { setTimeout(() => subj.focus(), 300); });
+        
+        const bodyC = document.getElementById('bodyContent');
+        if(!bodyC.value.trim()) return Swal.fire({ icon: 'warning', title: '입력 누락', text: '지출 목적 및 상세 내용을 입력해주세요.' }).then(() => { setTimeout(() => bodyC.focus(), 300); });
+        
+        const rows = document.getElementsByClassName('item-row');
+        const items = []; let total = 0;
+        for(let i=0; i<rows.length; i++) { 
+            const r = rows[i];
+            const nameEl = r.querySelector('.p-name');
+            const name = nameEl.value.trim(); 
+            if(!name) continue;
+            const unitVal = unformatNum(r.querySelector('.p-unit').value);
+            const qtyVal = unformatNum(r.querySelector('.p-qty').value);
+            const totalVal = unformatNum(r.querySelector('.p-total').value);
+            items.push({ name:name, unit: unitVal, qty: qtyVal, total: totalVal, biz:r.querySelector('.p-biz').value, method:r.querySelector('.p-method').value }); 
+            total += totalVal;
+        }
+
+        if(status === '제출완료' && newFilesQueue.length === 0 && existingFiles.length === 0) {
+            return Swal.fire({ icon: 'warning', title: '증빙 누락', text: '증빙 서류(영수증 등)를 첨부해 주세요.' }).then(() => { 
+                const fileInput = document.getElementById('attachment');
+                setTimeout(() => { fileInput.focus(); fileInput.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300); 
+            });
+        }
+
+        Swal.fire({ title: '처리 중...', html: '파일 업로드 및 저장 중입니다.', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
+        
+        let dNum = document.getElementById('trackingDocNum').value || document.getElementById('docNum').value;
+        if(!dNum || dNum === "(제출 시 자동 생성)") dNum = "";
+
+        const formData = new FormData();
+        formData.append('docNum', dNum);
+        formData.append('subject', subj.value);
+        formData.append('bodyContent', bodyC.value);
+        formData.append('totalAmount', total);
+        formData.append('executionDate', document.getElementById('execDate').value);
+        formData.append('reqDate', initData.reqDate || '');
+        formData.append('payDate', initData.payDate || '');
+        formData.append('presidentSignedDate', initData.presidentSignedDate || '');
+        formData.append('status', status);
+        formData.append('existingFileIds', existingFiles.join(","));
+        formData.append('items', JSON.stringify(items));
+
+        newFilesQueue.forEach(file => { formData.append('newAttachments', file); });
+        
+        const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+        fetch('/api/submit', {
+            method: 'POST',
+            headers: { 'CSRF-Token': token },
+            body: formData 
+        })
+        .then(res => res.json())
+        .then(res => {
+            if (res.status === 'Error') Swal.fire('오류', res.msg, 'error');
+            else Swal.fire('완료', res.msg, 'success').then(() => window.goList());
+        })
+        .catch(err => {
+            console.error(err); 
+            Swal.fire('통신 오류', '서버와 통신 중 오류가 발생했습니다.', 'error');
+        });
+    };
+    
+    // [수정] 행 추가 시 3열 배치 구조 및 Placeholder 적용
+    window.addRow = function() { 
+        const b = document.getElementById('itemBody'); 
+        const r = b.insertRow(-1); 
+        r.className = 'item-row'; 
+        
+        r.innerHTML = `
+            <td class="serial-cell txt-center">${b.rows.length} <button class="del-btn" onclick="window.delRow(this)">X</button></td>
+            <td><textarea class="p-name txt-center" rows="1"></textarea></td>
+            <td><input type="text" class="p-unit txt-right" oninput="window.handleNumInput(this)"></td>
+            <td><input type="text" class="p-qty txt-right" oninput="window.handleNumInput(this)"></td>
+            <td><input type="text" class="p-total txt-right" readonly placeholder="자동계산"></td>
+            <td><textarea class="p-biz txt-center" rows="1" placeholder="상호명, 이름"></textarea></td>
+            <td><textarea class="p-method txt-center" rows="1" placeholder="카드, 현금 등"></textarea></td>
+        `; 
+    };
+    
+    window.delRow = function(btn) { const b=document.getElementById('itemBody'); if(b.rows.length<=1) return; btn.closest('tr').remove(); for(let i=0;i<b.rows.length;i++) b.rows[i].cells[0].innerHTML = `${i+1} <button class="del-btn" onclick="window.delRow(this)">X</button>`; window.updateGrandTotal(); };
+    
+    window.processApprove = function(action) { 
+        let msg = "승인하시겠습니까?"; if(action === 'REJECT') msg = "반려하시겠습니까?";
+        Swal.fire({ title: '확인', text: msg, icon: 'question', showCancelButton: true }).then(r => { 
+            if(r.isConfirmed) {
+                Swal.fire({ title: '결재 처리 중...', html: '잠시만 기다려주세요.', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
+                const realDocNum = document.getElementById('trackingDocNum').value;
+                callApi('/api/approve', { docNum: realDocNum, action: action }).then(res => {
+                    const icon = res.msg.includes("오류") || res.msg.includes("없습니다") ? 'error' : 'success';
+                    Swal.fire('알림', res.msg, icon).then(() => window.goList());
+                });
+            }
+        }); 
+    };
+    
+    // [수정] 목록 버튼 클릭 시 원래 페이지로 이동
+    window.goList = function() { 
+        // 기존: window.location.href = '/list';
+        window.location.href = `/list?page=${listPage}&keyword=${encodeURIComponent(listKeyword)}&author=${encodeURIComponent(listAuthor)}`;
+    };
+    
+    window.recallDoc = function() {
+        Swal.fire({ title: '문서를 회수하시겠습니까?', text: "결재 진행 상황이 '작성중' 상태로 변경됩니다.", icon: 'warning', showCancelButton: true, confirmButtonColor: '#d35400', confirmButtonText: '회수 및 수정', cancelButtonText: '취소' }).then((result) => {
+            if (result.isConfirmed) {
+                callApi('/api/recall', { docNum: document.getElementById('trackingDocNum').value }).then(res => {
+                    if(res.status === 'Success') Swal.fire('회수 완료', res.msg, 'success').then(() => window.location.reload());
+                    else Swal.fire('오류', res.msg, 'error');
+                });
+            }
+        });
+    };
+    
+    // [수정] 잠금 해제 후 목록 이동 시에도 동일하게 적용
+    window.unlockAndGoList = function() { 
+        // 기존: window.location.href = '/list';
+        window.location.href = `/list?page=${listPage}&keyword=${encodeURIComponent(listKeyword)}&author=${encodeURIComponent(listAuthor)}`;
+    };
+    
+    // [수정] 파일 선택 시 용량(10MB) 및 형식 체크 로직 강화
+    window.handleFileSelect = function(input) { 
+        if (input.files && input.files.length > 0) { 
+            const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB (바이트 단위)
+            let hasTypeError = false;
+            let hasSizeError = false;
+
+            Array.from(input.files).forEach(file => {
+                // 1. 용량 체크
+                if (file.size > MAX_FILE_SIZE) {
+                    hasSizeError = true;
+                    return; // 용량 초과 파일은 추가하지 않고 건너뜀
+                }
+
+                // 2. 형식 체크
+                if (file.type.match('image.*') || file.type === 'application/pdf') {
+                    newFilesQueue.push(file); 
+                } else {
+                    hasTypeError = true;
+                }
+            });
+
+            // 3. 에러 알림 (용량 에러가 형식 에러보다 우선순위가 높도록 배치)
+            if (hasSizeError) {
+                Swal.fire({ 
+                    icon: 'warning', 
+                    title: '용량 초과', 
+                    text: '10MB를 초과하는 파일은 첨부할 수 없습니다.', 
+                    confirmButtonColor: '#d33' 
+                });
+            } else if (hasTypeError) {
+                Swal.fire({ 
+                    icon: 'error', 
+                    title: '지원하지 않는 형식', 
+                    text: '이미지(jpg, png 등) 또는 PDF 파일만 등록 가능합니다.', 
+                    confirmButtonColor: '#d33' 
+                });
+            }
+
+            renderNewFiles(); 
+            input.value = ''; // 같은 파일을 다시 선택할 수 있도록 초기화
+        } 
+    };
+    
+    function renderNewFiles() { 
+        const div = document.getElementById('new-file-list'); 
+        div.innerHTML = ''; 
+        newFilesQueue.forEach((f, idx) => { 
+            const itemDiv = document.createElement('div');
+            itemDiv.className = 'file-item';
+            const nameSpan = document.createElement('span');
+            nameSpan.textContent = `[추가] ${f.name}`; 
+            const delBtn = document.createElement('button');
+            delBtn.className = 'file-del-btn';
+            delBtn.textContent = '삭제';
+            delBtn.onclick = function() { removeNewFile(idx); }; 
+            itemDiv.appendChild(nameSpan);
+            itemDiv.appendChild(document.createTextNode(' ')); 
+            itemDiv.appendChild(delBtn);
+            div.appendChild(itemDiv);
+        });
+    }
+    window.removeNewFile = function(idx) { newFilesQueue.splice(idx, 1); renderNewFiles(); };
+    
+    window.removeExistingFile = function(id, btn) { 
+        Swal.fire({ title: '파일 삭제', text: "정말 삭제하시겠습니까? (서버에서도 영구 삭제됩니다)", icon: 'warning', showCancelButton: true, confirmButtonColor: '#d33', cancelButtonColor: '#3085d6', confirmButtonText: '네, 삭제합니다', cancelButtonText: '취소' }).then((result) => {
+            if (result.isConfirmed) {
+                callApi('/api/file/delete', { fileId: id }).then(res => { 
+                    existingFiles = existingFiles.filter(fid => fid !== id); 
+                    btn.parentElement.remove(); 
+                    Swal.fire('삭제 완료', res.msg, 'success'); 
+                });
+            }
+        });
+    };
+    
+    window.handleNumInput = function(el) { let val = el.value.replace(/[^0-9]/g, ''); if(!val) { el.value = ''; window.calculateRow(el); return; } el.value = formatNum(val); window.calculateRow(el); };
+    window.calculateRow = function(el) { const r=el.closest('tr'); const u = unformatNum(r.querySelector('.p-unit').value); const q = unformatNum(r.querySelector('.p-qty').value); const total = u * q; r.querySelector('.p-total').value = (total === 0 && (u===0 || q===0)) ? "" : formatNum(total); window.updateGrandTotal(); };
+    window.updateGrandTotal = function() { const rows = document.getElementsByClassName('item-row'); let grandTotal = 0; for(let i=0; i<rows.length; i++) { const rowTotal = unformatNum(rows[i].querySelector('.p-total').value); grandTotal += rowTotal; } document.getElementById('grandTotal').value = grandTotal > 0 ? formatNum(grandTotal) : ""; };
+
+    async function renderAttachmentsForPrint(attachmentIds) {
+        const printContainer = document.getElementById('print-image-container');
+        printContainer.innerHTML = ""; 
+        printContainer.className = "";
+        let hasVisibleAttachment = false;
+
+        if (!attachmentIds) return;
+        const files = attachmentIds.split(',');
+        
+        for (let i = 0; i < files.length; i++) {
+            const trimId = files[i].trim(); 
+            if(!trimId) continue;
+            
+            const lower = trimId.toLowerCase();
+            const box = document.createElement('div');
+            box.className = 'print-att-box';
+            let contentCreated = false;
+
+            if (/\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(lower)) {
+                box.innerHTML = `<span class="print-att-label">[별첨 ${i+1}] 증빙자료: ${trimId}</span><img class="print-att-img" src="/api/download/${trimId}" loading="eager">`;
+                contentCreated = true;
+            } 
+            else if (/\.pdf$/i.test(lower)) {
+                box.innerHTML = `<span class="print-att-label">[별첨 ${i+1}] 증빙자료: ${trimId}</span>`;
+                const canvas = document.createElement('canvas');
+                try {
+                    const loadingTask = pdfjsLib.getDocument(`/api/download/${trimId}`);
+                    const pdf = await loadingTask.promise;
+                    const page = await pdf.getPage(1);
+                    const viewport = page.getViewport({ scale: 2 });
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+                    const renderContext = { canvasContext: canvas.getContext('2d'), viewport: viewport };
+                    await page.render(renderContext).promise;
+                    const imgData = canvas.toDataURL('image/jpeg', 0.8);
+                    const img = document.createElement('img');
+                    img.className = 'print-att-img';
+                    img.src = imgData;
+                    box.appendChild(img);
+                    contentCreated = true;
+                } catch (e) {
+                    console.error("PDF Render Error", e);
+                    box.innerHTML += `<div style="color:red; margin-top:20px;">PDF 변환 오류</div>`;
+                    contentCreated = true;
+                }
+            }
+            if (contentCreated) { printContainer.appendChild(box); hasVisibleAttachment = true; }
+        }
+        if (hasVisibleAttachment) printContainer.classList.add('visible');
+    }
+
+    // [수정] initViewMode: innerHTML 구조 업데이트 (3열 배치 대응)
+    window.initViewMode = function(d) {
+      if(!d || Object.keys(d).length===0) return;
+      document.getElementById('trackingDocNum').value = d.docNum || "";
+      if (d.docNum && d.docNum.startsWith('TEMP-')) {
+          document.getElementById('docNum').value = "";
+          document.getElementById('docNum').placeholder = "(제출 시 자동 생성)";
+      } else { document.getElementById('docNum').value = d.docNum; }
+
+		// [핵심] 서명란 초기화 및 직책별 서명 위치 배정
+		document.getElementById('sig-applicant').innerHTML = '';
+		document.getElementById('sig-secretary').innerHTML = '';
+		document.getElementById('sig-president').innerHTML = '';
+
+		if (d.signatures && d.signatures.applicant) {
+			let targetId = 'sig-applicant';
+			if (d.applicantPos === '사무총장') targetId = 'sig-secretary';
+			if (d.applicantPos === '총동문회장') targetId = 'sig-president';
+			
+			renderSig(targetId, d.signatures.applicant);
+			
+			// 서명이 기안자 칸이 아닌 곳에 찍혔을 경우, 빈 칸이 된 앞쪽 칸들에 사선 다시 표시
+			if (d.applicantPos === '사무총장') {
+				document.getElementById('sig-applicant').innerHTML = '<div class="slash-mark">/</div>';
+			} else if (d.applicantPos === '총동문회장') {
+				document.getElementById('sig-applicant').innerHTML = '<div class="slash-mark">/</div>';
+				document.getElementById('sig-secretary').innerHTML = '<div class="slash-mark">/</div>';
+			}
+		}
+
+		// 타인의 승인 서명은 기안자가 해당 직책이 아닐 때만 표시
+		if (d.signatures.secretary && d.applicantPos !== '사무총장') renderSig('sig-secretary', d.signatures.secretary);
+		if (d.signatures.president && d.applicantPos !== '총동문회장') renderSig('sig-president', d.signatures.president);
+
+      document.getElementById('subject').value = d.subject || "";
+      document.getElementById('bodyContent').value = d.bodyContent || "";
+      if(d.executionDate) document.getElementById('execDate').value = d.executionDate;
+      if(d.reqDate) document.getElementById('reqDate').value = d.reqDate;
+      if(d.payDate) document.getElementById('payDate').value = d.payDate;
+      
+      const snap = d.snapshotData || {};
+      document.getElementById('u-info-line').innerText = `${d.applicantPos || ''} : ${d.applicantName || ''} (${snap.appPhone || d.applicantPhone || '-'})`;
+
+	  // [수정] 기안자 직책 표시 보완 (누가 기안했는지 명시)
+	  let posDisplay = d.applicantPos || '-';
+	  if (d.applicantPos === '사무총장' || d.applicantPos === '총동문회장') {
+	    posDisplay += " (기안)";
+	  }
+	  document.getElementById('u-pos-sign').innerText = posDisplay;
+      //document.getElementById('u-pos-sign').innerText = d.applicantPos || '-';
+
+      if (snap.presName) document.getElementById('info-president').innerText = `${snap.presName} (${snap.presPhone})`;
+      if (snap.secName) document.getElementById('info-secretary').innerText = `${snap.secName} (${snap.secPhone})`;
+
+      if (mode === 'VIEW') {
+          document.querySelectorAll('input, textarea').forEach(e => e.disabled = true);
+          document.getElementById('add-btn-area').style.display = 'none';
+          document.getElementById('new-file-area').style.display = 'none';
+          const guide = document.getElementById('att-guide-text'); if(guide) guide.style.display = 'none';
+      }
+      
+      // [수정] 파일 목록 표시 로직 개선 (파일명만 추출)
+      const list = document.getElementById('file-list'); list.innerHTML = "";
+      if (d.attachmentIds) { 
+        d.attachmentIds.split(',').forEach((id, idx) => { 
+          const trimId = id.trim(); 
+          if(!trimId) return; 
+          
+          // [핵심] 전체 경로에서 파일명만 추출
+          // 예: "evidence/2026/02/파일명.jpg" -> "파일명.jpg"
+          const displayName = trimId.split('/').pop();
+
+          const div = document.createElement('div'); div.className = 'file-item'; 
+          
+          // 화면 표시(innerText)는 displayName을 쓰고,
+          // 실제 다운로드 링크(openPreview)는 전체 경로(trimId)를 사용
+          const fileUrl = `/api/download/${trimId}`;
+          div.innerHTML = 
+          `
+            <a href="#" onclick="window.openPreview('${fileUrl}', '${displayName}'); return false;" class="file-link">
+                증빙파일 ${idx+1}: ${displayName}
+            </a> 
+            <button class="file-del-btn" style="display:none;" onclick="removeExistingFile('${trimId}', this)">삭제</button>
+          `; 
+          list.appendChild(div); 
+        });
+        
+        renderAttachmentsForPrint(d.attachmentIds);
+      }
+      
+      const b = document.getElementById('itemBody'); b.innerHTML = "";
+      if(d.items && d.items.length > 0) {
+          d.items.forEach((item, i) => { 
+            const r = b.insertRow(-1); 
+            r.className = 'item-row'; 
+            
+            // [수정] 3열 배치 구조 적용 및 Placeholder 추가
+            r.innerHTML = `
+                <td class="serial-cell txt-center">${i+1} <button class="del-btn" style="display:none" onclick="window.delRow(this)">X</button></td>
+                <td><textarea class="p-name txt-center" rows="1"></textarea></td>
+                <td><input type="text" class="p-unit txt-right" oninput="window.handleNumInput(this)"></td>
+                <td><input type="text" class="p-qty txt-right" oninput="window.handleNumInput(this)"></td>
+                <td><input type="text" class="p-total txt-right" readonly placeholder="자동계산"></td>
+                <td><textarea class="p-biz txt-center" rows="1" placeholder="상호명, 이름"></textarea></td>
+                <td><textarea class="p-method txt-center" rows="1" placeholder="카드, 현금 등"></textarea></td>
+            `;
+
+            r.querySelector('.p-name').value = item.name || '';
+            r.querySelector('.p-unit').value = formatNum(item.unit);
+            r.querySelector('.p-qty').value = formatNum(item.qty);
+            r.querySelector('.p-total').value = formatNum(item.total);
+            r.querySelector('.p-biz').value = item.biz || '';
+            r.querySelector('.p-method').value = item.method || '';
+          });
+      }
+      setTimeout(() => { document.querySelectorAll('.item-table textarea').forEach(el => autoResize(el)); }, 100);
+      window.updateGrandTotal();
+      renderSig('sig-applicant', d.signatures.applicant);
+      if(d.signatures.secretary) renderSig('sig-secretary', d.signatures.secretary);
+      if(d.signatures.president) renderSig('sig-president', d.signatures.president);
+	  // [추가] 상세 내용 높이 자동 조절 초기화
+      setTimeout(() => autoResize(document.getElementById('bodyContent')), 100);
+    };
+
+    // [수정] 서명 이미지 렌더링 함수 (레거시 데이터 호환성 강화)
+    function renderSig(id, fid) { 
+        if(fid) { 
+            let filePath = fid;
+            
+            // [핵심 수정] 파일명만 있는 경우(기존 데이터) 자동으로 'signatures/' 폴더 경로를 붙여줌
+            // 예: "my_sig.jpg" -> "signatures/my_sig.jpg"
+            if (!filePath.startsWith('signatures/') && !filePath.includes('/')) {
+                filePath = 'signatures/' + filePath;
+            }
+            
+            document.getElementById(id).innerHTML = `<img src="/api/download/${filePath}" class="sig-img">`;
+        }
+    }
+
+    window.printDoc = function() { 
+        document.getElementById('print-body-content-view').innerText = document.getElementById('bodyContent').value;
+        document.querySelectorAll('.item-table textarea').forEach(el => {
+             el.style.height = 'auto';
+             el.style.height = (el.scrollHeight) + 'px';
+        });
+
+        const docNum = document.getElementById('docNum').value || "문서번호없음";
+        const applicant = initData.applicantName || "기안자";
+        let payDate = document.getElementById('payDate').value;
+        if(!payDate) payDate = new Date().toISOString().slice(0,10);
+        const cleanDate = payDate.replace(/-/g, '');
+        const newTitle = `지출결의서_${docNum}_${applicant}_${cleanDate}`;
+        const originalTitle = document.title;
+        document.title = newTitle;
+        window.print();
+        setTimeout(() => { document.title = originalTitle; }, 1000);
+    };
+	
+	// [수정] 파일 미리보기 (PDF를 이미지로 변환하여 표시)
+    window.openPreview = async function(url, fileName) {
+        const modal = document.getElementById('previewModal');
+        const container = document.getElementById('previewContainer');
+        const title = document.getElementById('previewTitle');
+        const dlBtn = document.getElementById('downloadBtn');
+        const msg = document.getElementById('previewMsg');
+
+        // 1. 초기화
+        container.innerHTML = ""; // 기존 내용 비우기
+        msg.style.display = 'block'; // 로딩 표시
+        title.innerText = fileName || "파일 미리보기";
+        dlBtn.href = url;
+        modal.style.display = 'flex';
+
+        const lower = url.toLowerCase();
+        
+        try {
+            // 2. 이미지 파일인 경우
+            if (/\.(jpg|jpeg|png|gif|webp)$/i.test(lower)) {
+                const img = document.createElement('img');
+                img.src = url;
+                img.style.maxWidth = '100%';
+                img.style.maxHeight = '100%';
+                img.style.objectFit = 'contain';
+                img.onload = () => { msg.style.display = 'none'; };
+                container.appendChild(img);
+            } 
+            // 3. PDF 파일인 경우 (pdf.js로 렌더링)
+            else if (/\.pdf$/i.test(lower)) {
+                const loadingTask = pdfjsLib.getDocument(url);
+                const pdf = await loadingTask.promise;
+                
+                // 첫 페이지만 렌더링 (미리보기용)
+                const page = await pdf.getPage(1);
+                
+                // 모바일 가독성을 위해 스케일 조정 (1.5배 ~ 2배)
+                const viewport = page.getViewport({ scale: 1.5 });
+                
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+                
+                // 모바일 화면에 맞게 CSS 스타일 조정
+                canvas.style.maxWidth = '100%';
+                canvas.style.height = 'auto';
+                
+                const renderContext = {
+                    canvasContext: context,
+                    viewport: viewport
+                };
+                
+                await page.render(renderContext).promise;
+                
+                msg.style.display = 'none';
+                container.appendChild(canvas);
+            } 
+            // 4. 그 외 파일 (다운로드 유도)
+            else {
+                msg.style.display = 'none';
+                container.innerHTML = "<div style='text-align:center; padding:20px;'>미리보기를 지원하지 않는 형식입니다.<br>아래 버튼을 눌러 다운로드하세요.</div>";
+            }
+        } catch (e) {
+            console.error(e);
+            msg.style.display = 'none';
+            container.innerHTML = "<div style='color:red;'>파일을 불러오는 중 오류가 발생했습니다.</div>";
+        }
+    };
+
+    // [수정] 미리보기 닫기 (메모리 해제 등)
+    window.closePreview = function() {
+        const modal = document.getElementById('previewModal');
+        modal.style.display = 'none';
+        document.getElementById('previewContainer').innerHTML = ""; // 내용 비움
+    };
+  </script>
+</body>
+</html>

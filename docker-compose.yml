@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "8081:3000"
+    volumes:
+      - ./db:/usr/src/app/db
+      - ./uploads:/usr/src/app/uploads
+    env_file:
+      - .env
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    environment:
+      - NODE_ENV=production
+      - TZ=Asia/Seoul
+    restart: always

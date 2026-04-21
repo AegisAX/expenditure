@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="csrf-token" content="<%= csrfToken %>">
+  <title>금오공고 총동문회 - 로그인</title>
+  
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#2c3e50">
+  <link rel="apple-touch-icon" href="/icons/icon-192x192.png">
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js')
+          .then(reg => console.log('Service Worker registered.', reg))
+          .catch(err => console.log('Service Worker registration failed.', err));
+      });
+    }
+
+    // [PWA] 당겨서 새로고침 (Pull-to-Refresh)
+    document.addEventListener('DOMContentLoaded', function() {
+        PullToRefresh.init({
+            mainElement: 'body',      // 로그인 화면은 전체가 당겨져도 괜찮음
+            triggerElement: 'body',   
+            onRefresh: function() {
+                window.location.reload(); 
+            },
+            distThreshold: 70, distMax: 90, distReload: 60,
+            iconArrow: '&#8675;', iconRefreshing: '&hellip;',
+            instructionsPullToRefresh: '당겨서 새로고침',
+            instructionsReleaseToRefresh: '놓아서 새로고침',
+            instructionsRefreshing: '새로고침 중...'
+        });
+    });
+    
+    // [보안] 브라우저 종료 후 재접속 시 로그아웃 처리
+    window.addEventListener('load', function() {
+        const isLogin = sessionStorage.getItem('is_login');
+        if (!isLogin && document.cookie.includes('connect.sid')) { 
+             if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
+                 fetch('/api/logout').then(() => { window.location.href = '/login'; });
+             }
+        }
+        if (window.location.pathname !== '/login') sessionStorage.setItem('is_login', 'true');
+    });
+  </script>
+  
+  <script src="https://cdn.jsdelivr.net/npm/signature_pad@4.0.0/dist/signature_pad.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pulltorefreshjs/0.1.22/index.umd.min.js"></script>
+  
+  <style>
+    /* === [PWA 네이티브 앱 느낌 최적화] === */
+    html, body {
+      height: 100%; margin: 0; padding: 0;
+      background-color: #f0f2f5; 
+      font-family: -apple-system, BlinkMacSystemFont, "Malgun Gothic", sans-serif;
+      
+      /* Safe Area & Touch */
+      padding-top: calc(10px + env(safe-area-inset-top)); 
+      padding-bottom: calc(10px + env(safe-area-inset-bottom));
+      padding-left: calc(env(safe-area-inset-left));
+      padding-right: calc(env(safe-area-inset-right));
+      
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: none;
+      user-select: none; -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body { 
+      display: flex; flex-direction: column; align-items: center; justify-content: center; 
+      min-height: 100dvh; padding: 20px; overflow-y: auto; 
+    }
+
+    /* 입력창 텍스트 선택 가능 */
+    input, textarea, select { user-select: text; -webkit-user-select: text; }
+
+    /* === [로그인/가입 컨테이너 스타일] === */
+    * { box-sizing: border-box; }
+
+    .auth-wrapper {
+      width: 100%; max-width: 420px; background: white; padding: 25px; 
+      border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); margin: auto; 
+    }
+
+    /* 화면이 작을 때 (가로모드 등) 스크롤 허용 */
+    @media (max-height: 600px) {
+      body { justify-content: flex-start; padding-top: 40px; padding-bottom: 40px; }
+      .auth-wrapper { margin: 0 auto; }
+    }
+
+    .title-area { text-align: center; margin-bottom: 20px; }
+    .title-area h2 { margin: 0; font-size: 22px; color: #2c3e50; font-weight: 800; word-break: keep-all; line-height: 1.3; }
+
+    .tab-group { display: flex; margin-bottom: 20px; background: #f1f3f5; border-radius: 8px; padding: 3px; }
+    .tab-btn { flex: 1; padding: 8px; border: none; background: transparent; color: #868e96; font-weight: bold; font-size: 14px; cursor: pointer; border-radius: 6px; transition: all 0.2s; }
+    .tab-btn.active { background: white; color: #2c3e50; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+
+    .input-group { margin-bottom: 12px; }
+    .input-row { display: flex; gap: 10px; margin-bottom: 12px; }
+    .input-label { display: block; font-size: 12px; font-weight: bold; color: #495057; margin-bottom: 4px; }
+    
+    input, select { width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 6px; font-size: 15px; background-color: #fff; -webkit-appearance: none; }
+    input:focus, select:focus { border-color: #3498db; outline: none; }
+    select { background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='gray' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e"); background-repeat: no-repeat; background-position: right 10px center; background-size: 12px; }
+    select:invalid, select option[value=""] { color: #999; }
+
+    .sig-selector { display: flex; background-color: #f1f3f5; border-radius: 8px; padding: 4px; margin-bottom: 10px; }
+    .sig-selector input[type="radio"] { display: none; }
+    .sig-option-label { flex: 1; text-align: center; padding: 8px; font-size: 13px; font-weight: bold; color: #868e96; cursor: pointer; border-radius: 6px; transition: all 0.2s; border: 1px solid transparent; }
+    .sig-selector input[type="radio"]:checked + .sig-option-label { background-color: #fff; color: #2c3e50; box-shadow: 0 2px 5px rgba(0,0,0,0.05); border-color: #dee2e6; }
+
+    .sig-wrapper { border: 1px dashed #ced4da; border-radius: 6px; background-color: #f8f9fa; height: 110px; overflow: hidden; position: relative; }
+    canvas { width: 100%; height: 100%; display: block; }
+    
+    .file-upload-box { display: flex; align-items: center; justify-content: center; height: 100%; width: 100%; color: #888; font-size: 13px; cursor: pointer; flex-direction: column; gap: 5px; }
+    .file-upload-icon { font-size: 24px; color: #adb5bd; }
+    
+    .sig-tools { text-align: right; margin-top: 5px; margin-bottom: 10px; }
+    .clear-btn { font-size: 11px; color: #e74c3c; background: none; border: 1px solid #e74c3c; padding: 2px 8px; border-radius: 4px; cursor: pointer; }
+
+    .action-btn { width: 100%; padding: 12px; border: none; border-radius: 8px; background-color: #2c3e50; color: white; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 5px; }
+    .info-text { font-size: 12px; color: #888; margin-top: 10px; text-align: center; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <div class="auth-wrapper">
+    <div class="title-area">
+      <h2>금오공고 총동문회 전자결재시스템</h2>
+    </div>
+
+    <div class="tab-group">
+      <button class="tab-btn active" onclick="setMode('LOGIN')">로그인</button>
+      <button class="tab-btn" onclick="setMode('REGISTER')">회원가입</button>
+    </div>
+
+    <form id="authForm" onsubmit="return false;">
+      
+      <div id="login-fields">
+        <div class="input-group">
+          <label class="input-label">이메일</label>
+          <input type="email" id="login-email" placeholder="email@example.com">
+        </div>
+        <div class="input-group">
+          <label class="input-label">비밀번호</label>
+          <input type="password" id="login-password" placeholder="비밀번호">
+        </div>
+      </div>
+
+      <div id="register-fields" class="hidden">
+        
+        <div class="input-row">
+          <div style="flex: 1;">
+            <label class="input-label">이메일</label>
+            <input type="email" id="reg-email" placeholder="이메일">
+          </div>
+          <div style="flex: 1;">
+            <label class="input-label">비밀번호</label>
+            <input type="password" id="reg-password" placeholder="비밀번호">
+          </div>
+        </div>
+
+        <div class="input-row">
+          <div style="flex: 1;">
+            <label class="input-label">이름</label>
+            <input type="text" id="name" placeholder="성명">
+          </div>
+          <div style="flex: 1;">
+            <label class="input-label">대수</label>
+            <select id="generation">
+              <option value="" disabled selected>선택</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="input-row">
+          <div style="flex: 1;">
+            <label class="input-label">직책</label>
+            <select id="positionSelect" onchange="toggleDirectInput(this)">
+              <option value="" disabled selected>- 선택 -</option>
+              <option value="총동문회장">총동문회장</option>
+              <option value="수석부회장">수석부회장</option>
+              <option value="사무총장">사무총장</option>
+              <option value="기획국장">기획국장</option>
+              <option value="총무국장">총무국장</option>
+              <option value="재무국장">재무국장</option>
+              <option value="편집국장">편집국장</option>
+              <option value="문화국장">문화국장</option>
+              <option value="일반회원">일반회원</option>
+              <option value="DIRECT">직접입력</option>
+            </select>
+            <input type="text" id="positionInput" class="hidden" placeholder="직책 입력" style="margin-top:5px;">
+          </div>
+          <div style="flex: 1;">
+            <label class="input-label">연락처</label>
+            <input type="tel" id="phone" placeholder="010-0000-0000" maxlength="13" oninput="autoFormatPhone(this)">
+          </div>
+        </div>
+
+        <div class="input-group">
+          <label class="input-label">전자 서명 (필수)</label>
+          
+          <div class="sig-selector">
+              <input type="radio" id="sigTypeDraw" name="sigType" value="DRAW" checked onchange="toggleSigMode('DRAW')">
+              <label for="sigTypeDraw" class="sig-option-label">직접 서명 (그리기)</label>
+
+              <input type="radio" id="sigTypeFile" name="sigType" value="FILE" onchange="toggleSigMode('FILE')">
+              <label for="sigTypeFile" class="sig-option-label">이미지 첨부 (도장)</label>
+          </div>
+
+          <div id="sig-draw-area">
+              <div class="sig-wrapper">
+                <canvas id="signature-pad"></canvas>
+              </div>
+              <div class="sig-tools">
+                <button type="button" class="clear-btn" onclick="clearSignature()">지우기</button>
+              </div>
+          </div>
+
+          <div id="sig-file-area" class="hidden">
+              <div class="sig-wrapper" style="display:flex; align-items:center; justify-content:center; background:#fff;" onclick="document.getElementById('sig-file-input').click()">
+                  <input type="file" id="sig-file-input" accept="image/*" style="display:none;" onchange="previewSigFile(this)">
+                  <div class="file-upload-box">
+                      <span class="file-upload-icon">📂</span>
+                      <span id="file-name-display">클릭하여 이미지 선택</span>
+                  </div>
+              </div>
+              <div class="sig-tools">
+                  <button type="button" class="clear-btn" onclick="clearSigFile()">파일 취소</button>
+              </div>
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" class="action-btn" id="submit-btn" onclick="processAuth()">로그인</button>
+      <div class="info-text" id="footer-msg">계정이 없으신가요? 상단 '회원가입'을 선택하세요.</div>
+    </form>
+  </div>
+
+  <script>
+    let currentMode = 'LOGIN';
+    let signaturePad = null;
+    let sigMode = 'DRAW'; 
+    const targetDocNum = "<%= typeof targetDocNum !== 'undefined' ? targetDocNum : '' %>";
+
+    function getCsrfToken() { return document.querySelector('meta[name="csrf-token"]').getAttribute('content'); }
+
+    window.onload = function() {
+      const genSelect = document.getElementById('generation');
+      const currentYear = new Date().getFullYear();
+      const calculatedTerm = 20 + Math.floor((currentYear - 2026) / 2);
+
+      for(let i=1; i<=50; i++) {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.innerText = "제" + i + "대";
+        if (i === calculatedTerm) opt.selected = true;
+        genSelect.appendChild(opt);
+      }
+
+      const canvas = document.getElementById('signature-pad');
+      signaturePad = new SignaturePad(canvas, { backgroundColor: 'rgba(255, 255, 255, 0)', penColor: 'rgb(0, 0, 0)' });
+      
+      function resizeCanvas() {
+        const ratio = Math.max(window.devicePixelRatio || 1, 1);
+        canvas.width = canvas.offsetWidth * ratio;
+        canvas.height = canvas.offsetHeight * ratio;
+        canvas.getContext("2d").scale(ratio, ratio);
+        signaturePad.clear();
+      }
+      window.addEventListener("resize", resizeCanvas);
+      resizeCanvas();
+
+      setMode('LOGIN');
+    };
+
+    window.toggleSigMode = function(mode) {
+        sigMode = mode;
+        if (mode === 'DRAW') {
+            clearSigFile();
+            document.getElementById('sig-draw-area').classList.remove('hidden');
+            document.getElementById('sig-file-area').classList.add('hidden');
+            
+            const canvas = document.getElementById('signature-pad');
+            const ratio = Math.max(window.devicePixelRatio || 1, 1);
+            canvas.width = canvas.offsetWidth * ratio;
+            canvas.height = canvas.offsetHeight * ratio;
+            canvas.getContext("2d").scale(ratio, ratio);
+        } else {
+            clearSignature();
+            document.getElementById('sig-draw-area').classList.add('hidden');
+            document.getElementById('sig-file-area').classList.remove('hidden');
+        }
+    };
+
+    window.previewSigFile = function(input) {
+        if (input.files && input.files[0]) {
+            document.getElementById('file-name-display').innerText = input.files[0].name;
+            document.getElementById('file-name-display').style.color = "#2c3e50";
+            document.getElementById('file-name-display').style.fontWeight = "bold";
+        }
+    };
+
+    window.clearSigFile = function() {
+        document.getElementById('sig-file-input').value = "";
+        document.getElementById('file-name-display').innerHTML = '<span class="file-upload-icon">📂</span>클릭하여 이미지 선택';
+        document.getElementById('file-name-display').style.color = "#888";
+        document.getElementById('file-name-display').style.fontWeight = "normal";
+    };
+
+    window.toggleDirectInput = function(el) {
+      const input = document.getElementById('positionInput');
+      if (el.value === 'DIRECT') { input.classList.remove('hidden'); input.focus(); } 
+      else { input.classList.add('hidden'); input.value = ''; }
+    };
+
+    window.autoFormatPhone = function(el) {
+      let num = el.value.replace(/[^0-9]/g, '');
+      let formatted = '';
+      if (num.length < 4) formatted = num;
+      else if (num.length < 7) formatted = num.substr(0, 3) + '-' + num.substr(3);
+      else if (num.length < 11) formatted = num.substr(0, 3) + '-' + num.substr(3, 3) + '-' + num.substr(6);
+      else formatted = num.substr(0, 3) + '-' + num.substr(3, 4) + '-' + num.substr(7);
+      el.value = formatted;
+    };
+
+    function setMode(mode) {
+      currentMode = mode;
+      const loginFields = document.getElementById('login-fields');
+      const regFields = document.getElementById('register-fields');
+      const submitBtn = document.getElementById('submit-btn');
+      const btns = document.querySelectorAll('.tab-btn');
+      const footerMsg = document.getElementById('footer-msg');
+
+      if (mode === 'LOGIN') {
+        loginFields.classList.remove('hidden');
+        regFields.classList.add('hidden');
+        submitBtn.innerText = "로그인";
+        submitBtn.style.backgroundColor = "#2c3e50";
+        footerMsg.innerText = "계정이 없으신가요? 상단 '회원가입'을 선택하세요.";
+        btns[0].classList.add('active'); btns[1].classList.remove('active');
+        setTimeout(() => document.getElementById('login-email').focus(), 100);
+      } else {
+        loginFields.classList.add('hidden');
+        regFields.classList.remove('hidden');
+        submitBtn.innerText = "가입 신청";
+        submitBtn.style.backgroundColor = "#27ae60";
+        footerMsg.innerText = "관리자 승인 후 로그인이 가능합니다.";
+        btns[0].classList.remove('active'); btns[1].classList.add('active');
+        
+        setTimeout(() => {
+            if(sigMode === 'DRAW') {
+                const c = document.getElementById('signature-pad');
+                const r = Math.max(window.devicePixelRatio || 1, 1);
+                c.width = c.offsetWidth * r; c.height = c.offsetHeight * r;
+                c.getContext("2d").scale(r, r);
+            }
+            document.getElementById('reg-email').focus();
+        }, 100);
+      }
+    }
+
+    function clearSignature() { if(signaturePad) signaturePad.clear(); }
+
+    async function processAuth() {
+      const email = currentMode === 'LOGIN' ? document.getElementById('login-email').value.trim() : document.getElementById('reg-email').value.trim();
+      const password = currentMode === 'LOGIN' ? document.getElementById('login-password').value.trim() : document.getElementById('reg-password').value.trim();
+
+      if (!email || !password) return Swal.fire('알림', '이메일과 비밀번호를 입력해주세요.', 'warning');
+
+      const csrfToken = getCsrfToken();
+
+      if (currentMode === 'LOGIN') {
+        try {
+          const res = await fetch('/api/login', {
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json', 'CSRF-Token': csrfToken },
+            body: JSON.stringify({ email, password })
+          });
+          const data = await res.json();
+          if (data.status === 'Approved') window.location.href = targetDocNum ? `/form?docNum=${targetDocNum}` : (data.url || '/list');
+          else Swal.fire('실패', data.msg, 'error');
+        } catch (e) { Swal.fire('오류', '통신 오류', 'error'); }
+
+      } else {
+        const name = document.getElementById('name').value.trim();
+        const generation = document.getElementById('generation').value;
+        const phone = document.getElementById('phone').value.trim();
+        
+        const posSelect = document.getElementById('positionSelect');
+        let position = posSelect.value;
+        if (!position) return Swal.fire('알림', '직책을 선택해주세요.', 'warning');
+        if (position === 'DIRECT') {
+            position = document.getElementById('positionInput').value.trim();
+            if(!position) return Swal.fire('알림', '직책을 입력해주세요.', 'warning');
+        }
+
+        if (!name) return Swal.fire('알림', '이름을 입력해주세요.', 'warning');
+        if (!generation) return Swal.fire('알림', '대수를 선택해주세요.', 'warning');
+        if (!phone) return Swal.fire('알림', '연락처를 입력해주세요.', 'warning');
+
+        let signatureData = null;
+        let signatureType = 'image/jpeg';
+
+        if (sigMode === 'DRAW') {
+            if (signaturePad.isEmpty()) return Swal.fire('알림', '서명을 해주세요.', 'warning');
+            
+            const cvs = document.getElementById('signature-pad');
+            const ctx = cvs.getContext('2d');
+            ctx.globalCompositeOperation = "destination-over";
+            ctx.fillStyle = "#fff"; ctx.fillRect(0,0,cvs.width,cvs.height);
+            const dataUrl = signaturePad.toDataURL('image/jpeg', 0.8);
+            signatureData = dataUrl.split(',')[1];
+        } else {
+            const fileInput = document.getElementById('sig-file-input');
+            if (fileInput.files.length === 0) return Swal.fire('알림', '서명 이미지를 첨부해주세요.', 'warning');
+            const file = fileInput.files[0];
+            signatureType = file.type;
+            try {
+                const readBase64 = (f) => new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = error => reject(error);
+                    reader.readAsDataURL(f);
+                });
+                const base64Str = await readBase64(file);
+                signatureData = base64Str.split(',')[1];
+            } catch (err) { return Swal.fire('오류', '파일 처리 중 문제가 발생했습니다.', 'error'); }
+        }
+        
+        try {
+          Swal.fire({ title: '처리 중...', didOpen: () => Swal.showLoading() });
+          const res = await fetch('/api/register', {
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json', 'CSRF-Token': csrfToken },
+            body: JSON.stringify({
+              email, password, name, generation, position, phone,
+              signatureFile: { data: signatureData, type: signatureType }
+            })
+          });
+          const r = await res.json();
+          if (r.status === 'Success') Swal.fire('완료', r.msg, 'success').then(() => window.location.reload());
+          else Swal.fire('오류', r.msg, 'error');
+        } catch (e) { Swal.fire('오류', '가입 오류', 'error'); }
+      }
+    }
+  </script>
+</body>
+</html>
