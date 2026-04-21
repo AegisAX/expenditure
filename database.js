@@ -39,11 +39,10 @@ db.serialize(() => {
     reqDate TEXT,
     payDate TEXT,
     items JSON,
-    presidentSignedDate TEXT,
     status TEXT,
     appPos TEXT, appName TEXT, appPhone TEXT, appSig TEXT,
     secName TEXT, secPhone TEXT, secSig TEXT, secDate TEXT,
-    presName TEXT, presPhone TEXT, presSig TEXT, presDate TEXT,
+    presName TEXT, presPhone TEXT, presSig TEXT,
     file_paths TEXT,
     
     locked_by_name TEXT,

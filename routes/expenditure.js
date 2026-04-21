@@ -287,8 +287,8 @@ router.post('/api/approve', (req, res) => {
                     return res.json({ msg: "처리 중 오류가 발생하여 취소되었습니다." });
                 }
             }
-            db.run("UPDATE expenditures SET docNum=?, status=?, presName=?, presSig=?, presDate=?, presidentSignedDate=?, executionDate=?, file_paths=? WHERE docNum=?",
-                [newDocNum, nextStatus, user.name, user.signature_path, todayStr, todayStr, todayStr, newFilePaths, docNum],
+            db.run("UPDATE expenditures SET docNum=?, status=?, presName=?, presSig=?, executionDate=?, file_paths=? WHERE docNum=?",
+                [newDocNum, nextStatus, user.name, user.signature_path, todayStr, newFilePaths, docNum],
                 async function(err) {
                     if (err) {
                         for (const h of renameHistory) await fs.promises.rename(h.newPath, h.oldPath).catch(() => {});
@@ -397,7 +397,7 @@ router.post('/api/lock/release', (req, res) => {
 router.post('/api/recall', (req, res) => {
     const user = getUser(req);
     const { docNum } = req.body;
-    db.run(`UPDATE expenditures SET status='작성중', secName=NULL, secSig=NULL, secDate=NULL, presName=NULL, presSig=NULL, presDate=NULL, presidentSignedDate=NULL, locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=? AND applicantEmail=? AND status IN ('제출완료', '결재중')`,
+    db.run(`UPDATE expenditures SET status='작성중', secName=NULL, secSig=NULL, secDate=NULL, presName=NULL, presSig=NULL, executionDate=NULL, locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=? AND applicantEmail=? AND status IN ('제출완료', '결재중')`,
         [docNum, user.email], function(err) {
             if (err) return res.json({ status: 'Error', msg: err.message });
             if (this.changes === 0) return res.json({ status: 'Error', msg: '회수할 수 없는 상태입니다.' });

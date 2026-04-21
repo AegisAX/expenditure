@@ -858,7 +858,7 @@
         // executionDate는 총동문회장 결재 시 서버에서 자동 기록 — 클라이언트에서 전송하지 않음
         formData.append('reqDate', initData.reqDate || '');
         formData.append('payDate', initData.payDate || '');
-        formData.append('presidentSignedDate', initData.presidentSignedDate || '');
+        // presidentSignedDate, presDate는 executionDate로 통합됨 — 전송 불필요
         formData.append('status', status);
         formData.append('existingFileIds', existingFiles.join(","));
         formData.append('items', JSON.stringify(items));
