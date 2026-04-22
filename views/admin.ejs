@@ -249,7 +249,7 @@
         <button onclick="location.href='/list'" class="btn-back">메인으로</button>
     </div>
 
-    <div class="section" onclick="toggleSection(this)">
+<div class="section" onclick="toggleSection(this)">
       <h3>1. 시스템 환경 설정</h3>
       <div class="section-content">
           <div class="form-group">
@@ -260,7 +260,41 @@
             <label>사이트 접속 URL (메일 링크용)</label>
             <input type="text" id="setting-siteUrl" placeholder="예: http://localhost:8080 (끝에 / 제외)">
           </div>
+
+          <!-- [A-4] 메일(SMTP) 설정 영역 -->
+          <hr style="margin:20px 0; border:0; border-top:1px dashed #ccc;">
+          <div style="font-weight:bold; color:#34495e; margin-bottom:10px; font-size:15px;">📧 메일(SMTP) 설정</div>
+          <div class="section-desc">※ SMTP 설정은 저장 즉시 반영됩니다. 비밀번호는 보안상 마스킹(********) 되어 표시되며, 마스킹 상태로 저장하면 기존 값이 유지됩니다.</div>
+
+          <div class="form-group" style="display:flex; gap:10px;">
+              <div style="flex:3;">
+                  <label>SMTP 호스트</label>
+                  <input type="text" id="setting-smtp-host" placeholder="예: smtp.gmail.com">
+              </div>
+              <div style="flex:1;">
+                  <label>포트</label>
+                  <input type="text" id="setting-smtp-port" placeholder="465">
+              </div>
+          </div>
+          <div class="form-group">
+              <label>SMTP 계정 (발신 이메일)</label>
+              <input type="text" id="setting-smtp-user" placeholder="예: office@example.com">
+          </div>
+          <div class="form-group">
+              <label>SMTP 비밀번호 (또는 앱 비밀번호)</label>
+              <input type="password" id="setting-smtp-pass" placeholder="변경할 때만 새 비밀번호를 입력" autocomplete="new-password">
+          </div>
+          <div class="form-group">
+              <label>발신자 표시명</label>
+              <input type="text" id="setting-mail-from-name" placeholder="예: 금오공고 총동문회 사무국">
+          </div>
+
           <button class="btn-common save-btn" onclick="saveSettings()">설정 저장</button>
+          <button class="btn-common" id="btn-test-mail"
+                  style="background:#2980b9; color:white; width:100%; margin-top:8px;"
+                  onclick="sendTestMail()">
+              테스트 메일 발송 (관리자 본인 수신)
+          </button>
       </div>
     </div>
 
@@ -536,18 +570,72 @@
 
     function loadSettings() {
         fetch('/api/admin/settings').then(r=>r.json()).then(d=>{
-            if(d.address) document.getElementById('setting-address').value = d.address;
-            if(d.site_url) document.getElementById('setting-siteUrl').value = d.site_url;
+            if(d.address)  document.getElementById('setting-address').value  = d.address;
+            if(d.site_url) document.getElementById('setting-siteUrl').value  = d.site_url;
+
+            // [A-4] 메일 설정 필드 로딩. smtp_pass는 서버에서 '********' 로 마스킹되어 옴.
+            document.getElementById('setting-smtp-host').value      = d.smtp_host      || '';
+            document.getElementById('setting-smtp-port').value      = d.smtp_port      || '';
+            document.getElementById('setting-smtp-user').value      = d.smtp_user      || '';
+            document.getElementById('setting-smtp-pass').value      = d.smtp_pass      || '';
+            document.getElementById('setting-mail-from-name').value = d.mail_from_name || '';
         });
     }
 
     function saveSettings() {
-        const addr = document.getElementById('setting-address').value;
-        const url = document.getElementById('setting-siteUrl').value;
-        fetch('/api/admin/settings', { 
-            method: 'POST', headers: { 'Content-Type': 'application/json', 'CSRF-Token': getCsrfToken() },
-            body: JSON.stringify({ address: addr, site_url: url }) 
-        }).then(r=>r.json()).then(r=>Swal.fire('알림', r.msg, r.status==='Success'?'success':'error'));
+        const payload = {
+            address:        document.getElementById('setting-address').value,
+            site_url:       document.getElementById('setting-siteUrl').value,
+            // [A-4] 메일 설정 함께 저장.
+            smtp_host:      document.getElementById('setting-smtp-host').value,
+            smtp_port:      document.getElementById('setting-smtp-port').value,
+            smtp_user:      document.getElementById('setting-smtp-user').value,
+            // smtp_pass가 '********' 인 경우 서버에서 변경 없음으로 처리됨.
+            smtp_pass:      document.getElementById('setting-smtp-pass').value,
+            mail_from_name: document.getElementById('setting-mail-from-name').value
+        };
+        fetch('/api/admin/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'CSRF-Token': getCsrfToken() },
+            body: JSON.stringify(payload)
+        })
+        .then(r => r.json())
+        .then(r => {
+            Swal.fire('알림', r.msg, r.status === 'Success' ? 'success' : 'error');
+            if (r.status === 'Success') {
+                // 저장 성공 후 서버가 비밀번호를 마스킹한 값으로 갱신 → 다시 불러와 화면에 반영.
+                loadSettings();
+            }
+        })
+        .catch(err => Swal.fire('오류', err.message, 'error'));
+    }
+
+    // [A-4] 테스트 메일 발송 (관리자 본인 수신).
+    // 현재 DB에 저장된 SMTP 설정 기준으로 실제 발송한다.
+    // 저장 전 값이 화면에만 있는 상태라면, 먼저 "설정 저장" 을 누르도록 안내한다.
+    function sendTestMail() {
+        const btn = document.getElementById('btn-test-mail');
+        const originalText = btn.innerText;
+        btn.disabled = true;
+        btn.innerText = '발송 요청 중...';
+
+        fetch('/api/admin/settings/test-mail', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'CSRF-Token': getCsrfToken() }
+        })
+        .then(r => r.json())
+        .then(r => {
+            Swal.fire(
+                r.status === 'Success' ? '요청 완료' : '오류',
+                r.msg || '처리 결과를 받지 못했습니다.',
+                r.status === 'Success' ? 'success' : 'error'
+            );
+        })
+        .catch(err => Swal.fire('오류', err.message, 'error'))
+        .finally(() => {
+            btn.disabled = false;
+            btn.innerText = originalText;
+        });
     }
 
     function loadUsers() {
