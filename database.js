@@ -4,6 +4,13 @@ const crypto = require('crypto'); // [추가] 랜덤 문자열 생성을 위한 
 const db = new sqlite3.Database('./db/data.sqlite');
 
 db.serialize(() => {
+  // [성능] WAL 모드 + 동기 모드 완화로 동시성·쓰기 성능 개선
+  // NORMAL은 크래시 시 마지막 트랜잭션 일부 손실 가능성이 있으나 SQLite 자체 무결성은 유지
+  // 서버 무중단 운영 환경에서 허용 가능한 트레이드오프
+  db.run("PRAGMA journal_mode = WAL");
+  db.run("PRAGMA synchronous = NORMAL");
+  db.run("PRAGMA foreign_keys = ON");
+
   // 1. Users 테이블
   db.run(`CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

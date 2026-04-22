@@ -143,6 +143,8 @@ docker compose down
 ```
 
 > **데이터 저장 위치:** DB 파일과 첨부파일은 호스트의 `./db`, `./uploads` 디렉토리에 마운트되어 컨테이너를 재시작해도 유지됩니다.
+>
+> **백업 주의:** SQLite WAL 모드 사용 중이므로 백업 시 `data.sqlite`, `data.sqlite-wal`, `data.sqlite-shm` 세 파일을 함께 복사하거나, 컨테이너 내부에서 `sqlite3 db/data.sqlite ".backup db/backup.sqlite"` 명령으로 일관된 백업을 생성하세요.
 
 ---
 
