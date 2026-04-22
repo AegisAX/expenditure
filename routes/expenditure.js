@@ -189,10 +189,18 @@ router.post('/api/submit', (req, res, next) => {
 
         const afterSave = async () => {
             db.run("UPDATE expenditures SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=?", [finalDocNum]);
-            // 총동문회장이 직접 기안·제출한 경우 approve 경로를 거치지 않으므로
-            // 여기서 시행일자를 결재(제출)일로 기록한다.
-            if (initialStatus === '최종결재') {
-                db.run("UPDATE expenditures SET executionDate=? WHERE docNum=?", [getTodayKST(), finalDocNum]);
+            // 본인 기안 시 자동 승인되는 결재 단계를 DB 에도 기록 (감사 추적용)
+            const today = getTodayKST();
+            if (user.position === '사무총장' && initialStatus === '결재중') {
+                db.run(
+                    "UPDATE expenditures SET secName=?, secSig=?, secDate=? WHERE docNum=?",
+                    [user.name, user.signature_path, today, finalDocNum]
+                );
+            } else if (user.position === '총동문회장' && initialStatus === '최종결재') {
+                db.run(
+                    "UPDATE expenditures SET secName=?, secSig=?, secDate=?, presName=?, presSig=?, executionDate=? WHERE docNum=?",
+                    [user.name, user.signature_path, today, user.name, user.signature_path, today, finalDocNum]
+                );
             }
             let msg = "제출되었습니다.";
             if (initialStatus === '작성중') msg = "임시저장 되었습니다.";

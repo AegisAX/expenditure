@@ -541,15 +541,15 @@
 		  <tr>
 			<td colspan="2" class="label" style="border-bottom: none;">[ 예산집행의 품의 ]</td>
 			<td rowspan="4" class="label">결<br><br>재</td>
-			<td class="role-cell"><span id="u-pos-sign"></span></td>
-			<td class="role-cell">사무총장</td>
-			<td class="role-cell">총동문회장</td>
+			<td class="role-cell" id="header-applicant"><span id="u-pos-sign"></span></td>
+			<td class="role-cell" id="header-secretary">사무총장</td>
+			<td class="role-cell" id="header-president">총동문회장</td>
 		  </tr>
 		  <tr>
 			<td class="label">문 서 번 호</td>
 			<td class="content-cell">
 			  <input type="hidden" id="trackingDocNum" value="<%= docNum %>">
-			  <input type="text" id="docNum" value="<%= docNum %>" readonly placeholder="(제출 시 자동 생성)">
+			  <input type="text" id="docNum" value="<%= docNum %>" readonly placeholder="(자동 생성)">
 			</td>
 			<td rowspan="3" class="sig-box" id="sig-applicant" style="vertical-align: middle;">
 			  <% if (user.position === '사무총장' || user.position === '총동문회장') { %>
@@ -564,12 +564,12 @@
 			<td rowspan="3" class="sig-box" id="sig-president" style="vertical-align: middle;"></td>
 		  </tr>
 		  <tr><td class="label">시&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;행</td><td class="content-cell">금오총동문회 사무국</td></tr>
-		  <tr><td class="label">시 행 일 자</td><td class="content-cell"><input type="text" id="execDate" disabled placeholder="(총동문회장 결재 시 자동 설정)"></td></tr>
+		  <tr><td class="label">시 행 일 자</td><td class="content-cell"><input type="text" id="execDate" disabled placeholder="(자동 생성)"></td></tr>
 		  <tr>
 			<td class="label">지출요청일</td>
-			<td class="content-cell"><input type="text" id="reqDate" disabled placeholder="(제출 시 자동)"></td>
+			<td class="content-cell"><input type="text" id="reqDate" disabled placeholder="(자동 생성)"></td>
 			<td colspan="2" class="label">지 급 일 자</td>
-			<td colspan="2" class="content-cell"><input type="text" id="payDate" disabled placeholder="(지급 시 자동)"></td>
+			<td colspan="2" class="content-cell"><input type="text" id="payDate" disabled placeholder="(자동 생성)"></td>
 		  </tr>
 		  <tr>
 			<td class="label">제&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;목</td>
@@ -848,7 +848,7 @@
         Swal.fire({ title: '처리 중...', html: '파일 업로드 및 저장 중입니다.', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
         
         let dNum = document.getElementById('trackingDocNum').value || document.getElementById('docNum').value;
-        if(!dNum || dNum === "(제출 시 자동 생성)") dNum = "";
+        if(!dNum || dNum === "(자동 생성)") dNum = "";
 
         const formData = new FormData();
         formData.append('docNum', dNum);
@@ -1077,7 +1077,7 @@
       document.getElementById('trackingDocNum').value = d.docNum || "";
       if (d.docNum && d.docNum.startsWith('TEMP-')) {
           document.getElementById('docNum').value = "";
-          document.getElementById('docNum').placeholder = "(제출 시 자동 생성)";
+          document.getElementById('docNum').placeholder = "(자동 생성)";
       } else { document.getElementById('docNum').value = d.docNum; }
 
 		// [핵심] 서명란 초기화 및 직책별 서명 위치 배정
@@ -1086,33 +1086,32 @@
 		document.getElementById('sig-president').innerHTML = '';
 
 		if (d.signatures && d.signatures.applicant) {
-			let targetId = 'sig-applicant';
-			if (d.applicantPos === '사무총장') targetId = 'sig-secretary';
-			if (d.applicantPos === '총동문회장') targetId = 'sig-president';
-			
-			renderSig(targetId, d.signatures.applicant);
-			
-			// 서명이 기안자 칸이 아닌 곳에 찍혔을 경우, 빈 칸이 된 앞쪽 칸들에 사선 다시 표시
-			if (d.applicantPos === '사무총장') {
-				document.getElementById('sig-applicant').innerHTML = '<div class="slash-mark">/</div>';
-			} else if (d.applicantPos === '총동문회장') {
-				document.getElementById('sig-applicant').innerHTML = '<div class="slash-mark">/</div>';
-				document.getElementById('sig-secretary').innerHTML = '<div class="slash-mark">/</div>';
+      // 기안자 서명은 항상 왼쪽 '기안자' 칸에 표시
+      renderSig('sig-applicant', d.signatures.applicant);
+
+      // 사무총장·총동문회장 자가 기안 시, 자가 승인되는 결재칸은 슬래시(/)로 표시
+      // 총동문회장 기안 시 오른쪽 '총동문회장' 칸에는 본인 서명을 그대로 표시
+      if (d.applicantPos === '사무총장') {
+        document.getElementById('sig-secretary').innerHTML = '<div class="slash-mark">/</div>';
+      } else if (d.applicantPos === '총동문회장') {
+        document.getElementById('sig-secretary').innerHTML = '<div class="slash-mark">/</div>';
+        renderSig('sig-president', d.signatures.applicant);
 			}
 		}
 
 		// 타인의 승인 서명은 기안자가 해당 직책이 아닐 때만 표시
-		if (d.signatures.secretary && d.applicantPos !== '사무총장') renderSig('sig-secretary', d.signatures.secretary);
-		if (d.signatures.president && d.applicantPos !== '총동문회장') renderSig('sig-president', d.signatures.president);
+    // 자가 기안 시 건너뛴 결재칸은 슬래시를 유지해야 하므로 렌더링 스킵
+		if (d.signatures.secretary && d.applicantPos !== '사무총장' && d.applicantPos !== '총동문회장') renderSig('sig-secretary', d.signatures.secretary);
+    if (d.signatures.president && d.applicantPos !== '총동문회장') renderSig('sig-president', d.signatures.president);
 
-      document.getElementById('subject').value = d.subject || "";
-      document.getElementById('bodyContent').value = d.bodyContent || "";
-      if(d.executionDate) document.getElementById('execDate').value = d.executionDate;
-      if(d.reqDate) document.getElementById('reqDate').value = d.reqDate;
-      if(d.payDate) document.getElementById('payDate').value = d.payDate;
+    document.getElementById('subject').value = d.subject || "";
+    document.getElementById('bodyContent').value = d.bodyContent || "";
+    if(d.executionDate) document.getElementById('execDate').value = d.executionDate;
+    if(d.reqDate) document.getElementById('reqDate').value = d.reqDate;
+    if(d.payDate) document.getElementById('payDate').value = d.payDate;
       
-      const snap = d.snapshotData || {};
-      document.getElementById('u-info-line').innerText = `${d.applicantPos || ''} : ${d.applicantName || ''} (${snap.appPhone || d.applicantPhone || '-'})`;
+    const snap = d.snapshotData || {};
+    document.getElementById('u-info-line').innerText = `${d.applicantPos || ''} : ${d.applicantName || ''} (${snap.appPhone || d.applicantPhone || '-'})`;
 
 	  // [수정] 기안자 직책 표시 보완 (누가 기안했는지 명시)
 	  let posDisplay = d.applicantPos || '-';
@@ -1188,10 +1187,7 @@
       }
       setTimeout(() => { document.querySelectorAll('.item-table textarea').forEach(el => autoResize(el)); }, 100);
       window.updateGrandTotal();
-      renderSig('sig-applicant', d.signatures.applicant);
-      if(d.signatures.secretary) renderSig('sig-secretary', d.signatures.secretary);
-      if(d.signatures.president) renderSig('sig-president', d.signatures.president);
-	  // [추가] 상세 내용 높이 자동 조절 초기화
+	    // [추가] 상세 내용 높이 자동 조절 초기화
       setTimeout(() => autoResize(document.getElementById('bodyContent')), 100);
     };
 
