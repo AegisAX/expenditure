@@ -21,7 +21,9 @@ router.get('/api/admin/settings', requireAdmin, (req, res) => {
 });
 
 router.post('/api/admin/settings', requireAdmin, (req, res) => {
-    const { address, site_url } = req.body;
+    let { address, site_url } = req.body;
+    // 입력값 정리: 앞뒤 공백 제거 + 끝의 슬래시(중복 포함) 전부 제거
+    site_url = (site_url || '').trim().replace(/\/+$/, '');
     db.serialize(() => {
         db.run("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", ['address', address]);
         db.run("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", ['site_url', site_url], (err) => {
