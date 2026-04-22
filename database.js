@@ -21,9 +21,17 @@ db.serialize(() => {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
-  // [버전 호환성] 기존 DB에 컬럼이 없는 경우를 대비한 마이그레이션 (에러 무시)
-  db.run("ALTER TABLE users ADD COLUMN login_fail_count INTEGER DEFAULT 0", ()=>{});
-  db.run("ALTER TABLE users ADD COLUMN locked_until DATETIME", ()=>{});
+  // [버전 호환성] 기존 DB에 컬럼이 없는 경우를 대비한 마이그레이션, 이미 컬럼이 있는 경우(duplicate) 외의 오류는 로그 출력
+  db.run("ALTER TABLE users ADD COLUMN login_fail_count INTEGER DEFAULT 0", (err) => {
+    if (err && !/duplicate column name/i.test(err.message)) {
+      console.error('[DB Migrate] users.login_fail_count 추가 실패:', err.message);
+    }
+  });
+  db.run("ALTER TABLE users ADD COLUMN locked_until DATETIME", (err) => {
+    if (err && !/duplicate column name/i.test(err.message)) {
+      console.error('[DB Migrate] users.locked_until 추가 실패:', err.message);
+    }
+  });
 
   // 2. Settings 테이블
   db.run(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`);
@@ -53,9 +61,18 @@ db.serialize(() => {
   )`);
 
   // [버전 호환성] 기존 DB 마이그레이션
-  db.run("ALTER TABLE expenditures ADD COLUMN locked_by_name TEXT", ()=>{});
-  db.run("ALTER TABLE expenditures ADD COLUMN locked_by_email TEXT", ()=>{});
-  db.run("ALTER TABLE expenditures ADD COLUMN locked_at DATETIME", ()=>{});
+  const lockColumns = [
+    { name: 'locked_by_name',  type: 'TEXT' },
+    { name: 'locked_by_email', type: 'TEXT' },
+    { name: 'locked_at',       type: 'DATETIME' }
+  ];
+  lockColumns.forEach(col => {
+    db.run(`ALTER TABLE expenditures ADD COLUMN ${col.name} ${col.type}`, (err) => {
+      if (err && !/duplicate column name/i.test(err.message)) {
+        console.error(`[DB Migrate] expenditures.${col.name} 추가 실패:`, err.message);
+      }
+    });
+  });
   
   // [추가] 문서 번호 채번을 위한 시퀀스 테이블
   db.run(`CREATE TABLE IF NOT EXISTS doc_sequences (
