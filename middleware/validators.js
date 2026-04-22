@@ -98,8 +98,16 @@ const loginValidator = validate([
 ]);
 
 const expenditureValidator = validate([
-    body('subject').notEmpty().withMessage('제목을 입력해주세요.').trim(),
-    body('bodyContent').notEmpty().withMessage('내용을 입력해주세요.').trim(),
+    body('status').isIn(['작성중', '제출완료']).withMessage('상태 값이 올바르지 않습니다.'),
+    // 제목·내용은 '작성중'(임시저장)일 때 비어있어도 허용, '제출완료' 시에만 필수
+    body('subject').trim().custom((v, { req }) => {
+        if (req.body.status !== '작성중' && !v) throw new Error('제목을 입력해주세요.');
+        return true;
+    }),
+    body('bodyContent').trim().custom((v, { req }) => {
+        if (req.body.status !== '작성중' && !v) throw new Error('내용을 입력해주세요.');
+        return true;
+    }),
     body('totalAmount').isInt({ min: 0 }).withMessage('금액은 숫자여야 합니다.'),
 ]);
 

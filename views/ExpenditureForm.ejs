@@ -819,11 +819,14 @@
 
     window.submitForm = function(status) { 
         const subj = document.getElementById('subject');
-        if(!subj.value.trim()) return Swal.fire({ icon: 'warning', title: '입력 누락', text: '제목을 입력해주세요.' }).then(() => { setTimeout(() => subj.focus(), 300); });
-        
         const bodyC = document.getElementById('bodyContent');
-        if(!bodyC.value.trim()) return Swal.fire({ icon: 'warning', title: '입력 누락', text: '지출 목적 및 상세 내용을 입력해주세요.' }).then(() => { setTimeout(() => bodyC.focus(), 300); });
         
+        // 제출(신청)일 때만 필수 입력 검증, 임시저장은 빈 값 허용
+        if (status === '제출완료') {
+          if (!subj.value.trim()) return Swal.fire({ icon: 'warning', title: '입력 누락', text: '제목을 입력해주세요.' }).then(() => { setTimeout(() => subj.focus(), 300); });
+          if (!bodyC.value.trim()) return Swal.fire({ icon: 'warning', title: '입력 누락', text: '지출 목적 및 상세 내용을 입력해주세요.' }).then(() => { setTimeout(() => bodyC.focus(), 300); });
+        }
+
         const rows = document.getElementsByClassName('item-row');
         const items = []; let total = 0;
         for(let i=0; i<rows.length; i++) { 
