@@ -496,7 +496,6 @@ router.get('/api/download/*', (req, res) => {
                 const isApprover      = ['사무총장', '총동문회장', '재무국장'].includes(user.position);
                 if (!isPublicStatus && !isOwnerOrAdmin && !isApprover) return res.status(403).send('권한이 없습니다 (결재 진행 중인 타인의 문서).');
             }
-            try { await fs.promises.access(safePath); res.download(safePath); } catch { res.status(404).send('파일 없음'); }
             try {
                 await fs.promises.access(safePath);
                 // 증빙파일 다운로드 감사 로그
