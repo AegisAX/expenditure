@@ -473,6 +473,7 @@
       @page { size: A4; margin: 0; }
       html, body { width: 210mm; height: 100%; margin: 0; padding: 0; background-color: white; -webkit-print-color-adjust: exact; }
       .page { width: 210mm; min-height: 296mm; padding: 15mm; box-sizing: border-box; border: none; margin: 0; page-break-after: auto; box-shadow: none; }
+      .main-title { position: static !important; margin: 0 0 20px 0 !important; padding: 0 !important; border-bottom: none !important; }
       #bodyContent { display: none !important; }
       #print-body-content-view { display: block !important; }
       textarea { height: auto !important; overflow: visible !important; }
@@ -486,8 +487,8 @@
       .table-scroll-wrapper { overflow: visible; display: block; }
       .item-table { min-width: 100%; width: 100%; }
       .content-cell { height: auto !important; }
-	  .slash-mark { color: #bbb !important; -webkit-print-color-adjust: exact; }
-	  .slash-mark { color: #888 !important; -webkit-print-color-adjust: exact; }
+      .slash-mark { color: #bbb !important; -webkit-print-color-adjust: exact; }
+      .slash-mark { color: #888 !important; -webkit-print-color-adjust: exact; }
     }
 	
 	/* 사선(/) 표시용 스타일 보완 */
@@ -563,24 +564,24 @@
 			</td>
 			<td rowspan="3" class="sig-box" id="sig-president" style="vertical-align: middle;"></td>
 		  </tr>
-		  <tr><td class="label">시&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;행</td><td class="content-cell">금오총동문회 사무국</td></tr>
+		  <tr><td class="label">시&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;행</td><td class="content-cell"><input type="text" id="exec" disabled placeholder="금오공고 총동문회 사무국"></td></tr>
 		  <tr><td class="label">시 행 일 자</td><td class="content-cell"><input type="text" id="execDate" disabled placeholder="(자동 생성)"></td></tr>
 		  <tr>
-			<td class="label">지출요청일</td>
-			<td class="content-cell"><input type="text" id="reqDate" disabled placeholder="(자동 생성)"></td>
-			<td colspan="2" class="label">지 급 일 자</td>
-			<td colspan="2" class="content-cell"><input type="text" id="payDate" disabled placeholder="(자동 생성)"></td>
+			  <td class="label">지출요청일</td>
+			  <td class="content-cell"><input type="text" id="reqDate" disabled placeholder="(자동 생성)"></td>
+			  <td colspan="2" class="label">지 급 일 자</td>
+			  <td colspan="2" class="content-cell"><input type="text" id="payDate" disabled placeholder="(자동 생성)"></td>
 		  </tr>
 		  <tr>
-			<td class="label">제&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;목</td>
-			<td colspan="5" class="content-cell"><input type="text" id="subject" placeholder="지출 제목을 입력하세요." style="font-weight: bold;"></td>
+			<td class="label">제&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;목</td>
+			<td colspan="5" class="content-cell"><input type="text" id="subject" placeholder="제목을 입력하세요." style="font-weight: bold;"></td>
 		  </tr>
 		</table>
 
 		<table style="border-top: none;">
 		  <tr>
 			  <td class="content-cell" style="padding: 15px; vertical-align: top; min-height: 180px;">
-				  <textarea id="bodyContent" rows="10" placeholder="지출 목적 및 상세 내용을 입력하세요." oninput="autoResize(this)"></textarea>
+				  <textarea id="bodyContent" rows="10" placeholder="내용을 입력하세요." oninput="autoResize(this)"></textarea>
 				  <div id="print-body-content-view" class="print-only-div"></div>
 			  </td>
 		  </tr>
