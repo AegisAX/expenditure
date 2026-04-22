@@ -74,6 +74,37 @@ function logAction(req, action, details) {
     );
 }
 
+// [A-1] .env의 SMTP_* 값을 DB settings 로 1회 이관
+// DB의 smtp_host가 비어있고 .env에 SMTP_HOST가 있을 때만 동작
+// 이미 관리자가 DB에서 설정을 바꾼 뒤라면 절대 덮어쓰지 않음
+function migrateEnvMailToDB() {
+    db.get("SELECT value FROM settings WHERE key = 'smtp_host'", [], (err, row) => {
+        if (err) {
+            console.error('[DB Migrate] smtp_host 조회 실패:', err.message);
+            return;
+        }
+        const dbHostEmpty = !row || !row.value;
+        const envHost = process.env.SMTP_HOST;
+        if (!dbHostEmpty || !envHost) return;
+
+        const envMap = {
+            smtp_host: process.env.SMTP_HOST || '',
+            smtp_port: process.env.SMTP_PORT || '465',
+            smtp_user: process.env.SMTP_USER || '',
+            smtp_pass: process.env.SMTP_PASS || ''
+        };
+        const stmt = db.prepare("UPDATE settings SET value = ? WHERE key = ?");
+        Object.entries(envMap).forEach(([k, v]) => {
+            stmt.run([v, k], (e) => {
+                if (e) console.error(`[DB Migrate] .env → DB 이관 실패(${k}):`, e.message);
+            });
+        });
+        stmt.finalize(() => {
+            console.log('>> [DB Migrate] .env의 SMTP 설정을 DB로 1회 이관했습니다. 이후에는 관리자 화면에서 관리됩니다.');
+        });
+    });
+}
+
 function checkAndMigrateDB() {
     console.log(">> [DB Check] 데이터베이스 컬럼 검사 시작...");
     const requiredColumns = [
@@ -136,8 +167,74 @@ function checkAndMigrateDB() {
             }
         })();
 
+        // [A-1] .env → DB 1회 이관 시도
+        migrateEnvMailToDB();
+
         console.log(`>> [DB Check] 검사 완료. (추가된 컬럼: ${added}개)`);
     });
 }
 
-module.exports = { getTodayKST, getUser, getUserByPos, getNextDocNum, getSiteUrl, clearStaleLocks, logAction, checkAndMigrateDB };
+// [A-1] settings 키 배열을 한 번에 조회하여 {key: value} 객체로 반환.
+// 누락된 key는 빈 문자열로 채워준다.
+function getSettings(keys) {
+    return new Promise((resolve, reject) => {
+        if (!Array.isArray(keys) || keys.length === 0) return resolve({});
+        const placeholders = keys.map(() => '?').join(',');
+        db.all(
+            `SELECT key, value FROM settings WHERE key IN (${placeholders})`,
+            keys,
+            (err, rows) => {
+                if (err) return reject(err);
+                const result = {};
+                keys.forEach(k => { result[k] = ''; });
+                (rows || []).forEach(r => { result[r.key] = r.value == null ? '' : String(r.value); });
+                resolve(result);
+            }
+        );
+    });
+}
+
+// [A-1] settings 일괄 upsert. undefined 값은 스킵(미변경), 빈 문자열은 저장.
+// 원자성 보장을 위해 BEGIN IMMEDIATE 트랜잭션 사용.
+function saveSettings(obj) {
+    return new Promise((resolve, reject) => {
+        if (!obj || typeof obj !== 'object') return resolve();
+        const entries = Object.entries(obj).filter(([, v]) => v !== undefined);
+        if (entries.length === 0) return resolve();
+
+        db.serialize(() => {
+            db.run('BEGIN IMMEDIATE', (e) => {
+                if (e) return reject(e);
+                const stmt = db.prepare(
+                    'INSERT INTO settings (key, value) VALUES (?, ?) ' +
+                    'ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+                );
+                let pending = entries.length;
+                let failed = false;
+                entries.forEach(([k, v]) => {
+                    stmt.run([k, v == null ? '' : String(v)], (err) => {
+                        if (failed) return;
+                        if (err) {
+                            failed = true;
+                            db.run('ROLLBACK', () => reject(err));
+                            return;
+                        }
+                        pending -= 1;
+                        if (pending === 0) {
+                            stmt.finalize((ferr) => {
+                                if (ferr) return db.run('ROLLBACK', () => reject(ferr));
+                                db.run('COMMIT', (cerr) => cerr ? reject(cerr) : resolve());
+                            });
+                        }
+                    });
+                });
+            });
+        });
+    });
+}
+
+module.exports = {
+    getTodayKST, getUser, getUserByPos, getNextDocNum, getSiteUrl,
+    clearStaleLocks, logAction, checkAndMigrateDB,
+    getSettings, saveSettings
+};

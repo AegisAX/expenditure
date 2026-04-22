@@ -101,7 +101,13 @@ db.serialize(() => {
   // 기본 정보 설정
   const defaultSettings = [
     { key: 'address', value: '(04210) 서울특별시 마포구 마포대로14길 14(공덕동), 태영빌딩 6층 (제20대 금오공업고등학교 총동문회)' },
-    { key: 'admin_phone', value: '02-3275-0118' }
+    { key: 'admin_phone', value: '02-3275-0118' },
+    // [A-1] 메일 설정 기본값 (관리자 화면에서 편집)
+    { key: 'smtp_host',      value: '' },
+    { key: 'smtp_port',      value: '465' },
+    { key: 'smtp_user',      value: '' },
+    { key: 'smtp_pass',      value: '' },
+    { key: 'mail_from_name', value: '금오공고 총동문회 사무국' }
   ];
   defaultSettings.forEach(setting => {
     db.run(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`, [setting.key, setting.value]);
