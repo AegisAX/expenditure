@@ -4,33 +4,130 @@ const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const db = require('../database');
-const { logAction } = require('../helpers/db');
+const { logAction, getSettings, saveSettings } = require('../helpers/db');
 const { uploadDir, saveFile } = require('../helpers/file');
 const { requireAdmin } = require('../middleware/auth');
 const { validatePassword } = require('../middleware/validators');
+const { reloadTransporter, sendEmail, getCurrentMailSettings } = require('../helpers/email');
 
 router.get('/admin', requireAdmin, (req, res) => res.render('admin'));
 
-router.get('/api/admin/settings', requireAdmin, (req, res) => {
-    db.all("SELECT key, value FROM settings", [], (err, rows) => {
-        if (err) return res.json({});
-        const settings = {};
-        rows.forEach(r => settings[r.key] = r.value);
-        res.json(settings);
-    });
+// [A-3] 설정 조회: 기본 정보 + SMTP 설정(비밀번호는 마스킹)
+router.get('/api/admin/settings', requireAdmin, async (req, res) => {
+    try {
+        const keys = [
+            'address', 'admin_phone', 'site_url',
+            'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'mail_from_name'
+        ];
+        const s = await getSettings(keys);
+        const hasPass = !!s.smtp_pass;
+        res.json({
+            address:        s.address || '',
+            admin_phone:    s.admin_phone || '',
+            site_url:       s.site_url || '',
+            smtp_host:      s.smtp_host || '',
+            smtp_port:      s.smtp_port || '',
+            smtp_user:      s.smtp_user || '',
+            // 실제 비밀번호는 클라이언트로 내보내지 않음.
+            // 값이 저장되어 있으면 '********' 자리표시자만 반환.
+            smtp_pass:      hasPass ? '********' : '',
+            mail_from_name: s.mail_from_name || ''
+        });
+    } catch (e) {
+        res.status(500).json({ status: 'Error', msg: e.message });
+    }
 });
 
-router.post('/api/admin/settings', requireAdmin, (req, res) => {
-    let { address, site_url } = req.body;
-    // 입력값 정리: 앞뒤 공백 제거 + 끝의 슬래시(중복 포함) 전부 제거
-    site_url = (site_url || '').trim().replace(/\/+$/, '');
-    db.serialize(() => {
-        db.run("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", ['address', address]);
-        db.run("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", ['site_url', site_url], (err) => {
-            if (err) res.json({ status: 'Error', msg: err.message });
-            else res.json({ status: 'Success', msg: '설정이 저장되었습니다.' });
+// [A-3] 설정 저장: 기본 정보 + SMTP. smtp_pass='********'는 변경 없음으로 처리.
+// SMTP 관련 키가 변경된 경우에만 transporter 재생성.
+router.post('/api/admin/settings', requireAdmin, async (req, res) => {
+    try {
+        const body = req.body || {};
+        const toSave = {};
+
+        // 기본 정보 3종 — 제공된 경우만 저장
+        if (body.address !== undefined)     toSave.address     = String(body.address).trim();
+        if (body.admin_phone !== undefined) toSave.admin_phone = String(body.admin_phone).trim();
+        if (body.site_url !== undefined) {
+            // 기존 로직과 동일: 앞뒤 공백 제거 + 끝의 슬래시(중복 포함) 제거
+            toSave.site_url = String(body.site_url).trim().replace(/\/+$/, '');
+        }
+
+        // SMTP 4종 + 표시명 — 제공된 경우만 저장
+        ['smtp_host', 'smtp_port', 'smtp_user', 'mail_from_name'].forEach(k => {
+            if (body[k] !== undefined) toSave[k] = String(body[k]).trim();
         });
-    });
+
+        // smtp_pass: '********' 이면 기존값 유지(스킵), 그 외에는 그대로 저장.
+        // 빈 문자열 저장 시 = 비밀번호 제거 의도(관리자가 의도적으로 비움).
+        if (body.smtp_pass !== undefined && body.smtp_pass !== '********') {
+            toSave.smtp_pass = String(body.smtp_pass);
+        }
+
+        await saveSettings(toSave);
+
+        // SMTP 관련 키가 하나라도 포함되어 있으면 transporter 재생성
+        const MAIL_KEYS = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'mail_from_name'];
+        const mailKeysChanged = MAIL_KEYS.some(k => Object.prototype.hasOwnProperty.call(toSave, k));
+        if (mailKeysChanged) {
+            await reloadTransporter();
+        }
+
+        // 감사로그: 변경된 "키 이름"만 기록(값은 기록하지 않음 — 비밀번호 유출 방지)
+        logAction(req, 'ADMIN_SETTINGS_UPDATE',
+            `설정 변경 (${Object.keys(toSave).join(', ') || '없음'})`);
+
+        res.json({ status: 'Success', msg: '설정이 저장되었습니다.' });
+    } catch (e) {
+        res.status(500).json({ status: 'Error', msg: e.message });
+    }
+});
+
+// [A-3] 테스트 메일 발송. 수신자 = 로그인한 관리자 본인.
+// 현재 transporter(= 저장된 설정 기준)로 실제 발송을 시도한다.
+// sendEmail은 fire-and-forget 이므로 응답은 "요청 수락"까지만 보장한다.
+router.post('/api/admin/settings/test-mail', requireAdmin, (req, res) => {
+    const user = req.session.user;
+    if (!user || !user.email) {
+        return res.status(400).json({ status: 'Error', msg: '관리자 이메일을 찾을 수 없습니다.' });
+    }
+
+    const current = getCurrentMailSettings();
+    if (!current.smtp_host || !current.smtp_user || !current.smtp_pass) {
+        return res.status(400).json({
+            status: 'Error',
+            msg: 'SMTP 설정이 완료되지 않았습니다. 호스트/계정/비밀번호를 먼저 저장해 주세요.'
+        });
+    }
+
+    const now = new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+    const escape = (s) => String(s || '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+    const html =
+        '<div style="font-family:\'Malgun Gothic\',\'맑은 고딕\',sans-serif;max-width:520px;margin:0 auto;padding:20px;border:1px solid #e0e0e0;border-radius:8px;">' +
+            '<h2 style="color:#2c3e50;border-bottom:2px solid #2c3e50;padding-bottom:8px;">전자결재 메일 설정 테스트</h2>' +
+            '<p style="font-size:15px;color:#333;">본 메일은 관리자 설정 화면에서 발송된 <b>테스트 메일</b>입니다.</p>' +
+            '<table style="width:100%;font-size:14px;color:#444;margin:16px 0;">' +
+                '<tr><td style="padding:6px 0;width:110px;color:#888;">발송 시각</td><td>' + escape(now) + '</td></tr>' +
+                '<tr><td style="padding:6px 0;color:#888;">SMTP 호스트</td><td>' + escape(current.smtp_host) + ':' + escape(current.smtp_port) + '</td></tr>' +
+                '<tr><td style="padding:6px 0;color:#888;">발신 계정</td><td>' + escape(current.smtp_user) + '</td></tr>' +
+                '<tr><td style="padding:6px 0;color:#888;">표시명</td><td>' + escape(current.mail_from_name || '(미설정)') + '</td></tr>' +
+            '</table>' +
+            '<p style="margin-top:24px;font-size:12px;color:#999;">이 메일을 수신하셨다면 SMTP 설정이 정상 동작하는 것입니다.</p>' +
+        '</div>';
+
+    try {
+        sendEmail(user.email, '[테스트] 금오공고 총동문회 전자결재 메일 설정 확인', html);
+        logAction(req, 'ADMIN_SETTINGS_TEST_MAIL', `테스트 메일 발송 요청: ${user.email}`);
+        res.json({
+            status: 'Success',
+            msg: `${user.email} 로 테스트 메일을 발송 요청했습니다. 수신을 확인해 주세요.`
+        });
+    } catch (e) {
+        res.status(500).json({ status: 'Error', msg: '테스트 메일 발송 중 오류: ' + e.message });
+    }
 });
 
 router.post('/api/admin/user/unlock', requireAdmin, (req, res) => {
