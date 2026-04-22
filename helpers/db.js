@@ -87,7 +87,11 @@ function checkAndMigrateDB() {
         let added = 0;
         requiredColumns.forEach(col => {
             if (!existingNames.includes(col.name)) {
-                db.run(`ALTER TABLE expenditures ADD COLUMN ${col.name} ${col.type}`);
+                db.run(`ALTER TABLE expenditures ADD COLUMN ${col.name} ${col.type}`, (err) => {
+                    if (err && !/duplicate column name/i.test(err.message)) {
+                        console.error(`[DB Migrate Runtime] expenditures.${col.name} 추가 실패:`, err.message);
+                    }
+                });
                 added++;
             }
         });
