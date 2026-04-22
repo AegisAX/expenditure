@@ -497,6 +497,13 @@ router.get('/api/download/*', (req, res) => {
                 if (!isPublicStatus && !isOwnerOrAdmin && !isApprover) return res.status(403).send('권한이 없습니다 (결재 진행 중인 타인의 문서).');
             }
             try { await fs.promises.access(safePath); res.download(safePath); } catch { res.status(404).send('파일 없음'); }
+            try {
+                await fs.promises.access(safePath);
+                // 증빙파일 다운로드 감사 로그
+                const docStatus = row ? row.status : 'UNKNOWN';
+                logAction(req, 'FILE_DOWNLOAD', `증빙파일 다운로드: ${relativePath} (상태: ${docStatus})`);
+                res.download(safePath);
+            } catch { res.status(404).send('파일 없음'); }
         }
     );
 });
