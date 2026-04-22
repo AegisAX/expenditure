@@ -161,7 +161,7 @@ router.post('/api/submit', (req, res, next) => {
     const renamedFilePaths = [];
     try {
         let filePaths = [];
-        if (f.existingFileIds) filePaths = f.existingFileIds.split(',').filter(x => x);
+        if (f.existingFileIds) filePaths = f.existingFileIds.split(',').map(s => s.trim()).filter(x => x);
         const { fileTypeFromFile } = await import('file-type');
         if (uploadedFiles.length > 0) {
             const timestamp = Date.now();
