@@ -20,7 +20,12 @@ router.post('/api/login', loginRateLimiter, loginValidator, (req, res) => {
         }
         if (row.locked_until && new Date(row.locked_until) > new Date()) {
             // 계정 잠금은 IP 카운터와 무관 — 카운트 증가 안 함
-            return res.json({ status: 'Fail', msg: '계정 잠김' });
+            const remainMs  = new Date(row.locked_until) - new Date();
+            const remainMin = Math.ceil(remainMs / 60000);
+            return res.json({
+                status: 'Fail',
+                msg: `계정이 잠겨 있습니다. 약 ${remainMin}분 후 다시 시도해 주세요.`
+            });
         }
         if (await bcrypt.compare(password, row.password)) {
             if (row.status !== 'Approved') {
