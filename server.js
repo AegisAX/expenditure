@@ -10,6 +10,7 @@ const helmet     = require('helmet');
 const SQLiteStore = require('connect-sqlite3')(session);
 
 const { checkAndMigrateDB, clearStaleLocks } = require('./helpers/db');
+const { initTransporter } = require('./helpers/email');
 const { requireLogin } = require('./middleware/auth');
 const authRoutes        = require('./routes/auth');
 const expenditureRoutes = require('./routes/expenditure');
@@ -85,6 +86,13 @@ app.use((err, req, res, next) => {
 
 setTimeout(checkAndMigrateDB, 1000);
 setInterval(clearStaleLocks, 10 * 60 * 1000);
+
+// [A-2] 기동 시 DB 에서 SMTP 설정을 읽어 transporter 초기화.
+// settings 테이블이 준비된 후 실행되도록 checkAndMigrateDB(1초 지연) 이후 타이밍에 맞춰 호출한다.
+// 실패하더라도 서버 자체는 계속 기동된다 (메일만 비활성).
+setTimeout(() => {
+    initTransporter().catch(e => console.error('[Mail Error] init:', e.message));
+}, 1500);
 
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
