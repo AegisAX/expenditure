@@ -97,8 +97,30 @@ const loginValidator = validate([
     body('password').notEmpty().withMessage('비밀번호를 입력해주세요.')
 ]);
 
+// [B-2] 라우터/검증 진입 직전 docType / totalAmount 사전 정규화 미들웨어.
+//  - docType: 'G' 가 아니면 모두 'E' 로 강제 (화이트리스트)
+//  - totalAmount: 'G'면 0으로 강제, 'E'면 parseInt 후 라우터까지 숫자 타입으로 전달
+//                 정규화 실패 시 -1 로 두어 isInt({min:0}) 검증에서 자연스럽게 거부되도록 함
+function normalizeExpenditureBody(req, res, next) {
+    if (!req.body) return next();
+    req.body.docType = (req.body.docType === 'G') ? 'G' : 'E';
+    if (req.body.docType === 'G') {
+        req.body.totalAmount = 0;
+    } else {
+        const raw = req.body.totalAmount;
+        const n = parseInt(raw, 10);
+        req.body.totalAmount = Number.isFinite(n) && n >= 0 ? n : -1;
+    }
+    next();
+}
+
 const expenditureValidator = validate([
     body('status').isIn(['작성중', '제출완료']).withMessage('상태 값이 올바르지 않습니다.'),
+
+    // [B-2] docType: 'E'(지출결의서, 기본) 또는 'G'(일반 기안)만 허용. 미지정·이상값은 'E'로 간주.
+    body('docType').optional({ checkFalsy: true })
+        .isIn(['E', 'G']).withMessage('문서 유형이 올바르지 않습니다.'),
+
     // 제목·내용은 '작성중'(임시저장)일 때 비어있어도 허용, '제출완료' 시에만 필수
     body('subject').trim().custom((v, { req }) => {
         if (req.body.status !== '작성중' && !v) throw new Error('제목을 입력해주세요.');
@@ -124,5 +146,6 @@ setInterval(() => {
 module.exports = {
     loginRateLimiter, recordLoginFailure, resetLoginAttempts,
     registerLimiter, registerValidator, loginValidator,
-    expenditureValidator, validatePassword
+    expenditureValidator, validatePassword,
+    normalizeExpenditureBody   // [B-2] 추가
 };
