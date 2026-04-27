@@ -204,7 +204,19 @@ router.get('/api/admin/list', requireAdmin, (req, res) => {
         if (err) return res.json({ docs: [], total: 0 });
         db.all(`SELECT * FROM expenditures ${whereClause} ORDER BY docNum DESC LIMIT ? OFFSET ?`, [...params, limit, offset], (err, rows) => {
             if (err) return res.json({ docs: [], total: 0 });
-            res.json({ docs: rows.map(doc => ({ docNum: doc.docNum, subject: doc.subject, applicant: doc.appName || '-', stage: doc.status })), total: countRow.count, page, totalPages: Math.ceil(countRow.count / limit) });
+            // [B-3] 응답에 docType 추가 — 관리자 화면에서 유형 배지 표시용
+            res.json({
+                docs: rows.map(doc => ({
+                    docNum: doc.docNum,
+                    subject: doc.subject,
+                    applicant: doc.appName || '-',
+                    stage: doc.status,
+                    docType: doc.docType || 'E'
+                })),
+                total: countRow.count,
+                page,
+                totalPages: Math.ceil(countRow.count / limit)
+            });
         });
     });
 });
