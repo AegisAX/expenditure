@@ -55,6 +55,7 @@ db.serialize(() => {
     payDate TEXT,
     items JSON,
     status TEXT,
+    docType TEXT NOT NULL DEFAULT 'E',
     appPos TEXT, appName TEXT, appPhone TEXT, appSig TEXT,
     secName TEXT, secSig TEXT, secDate TEXT,
     presName TEXT, presSig TEXT,
@@ -66,6 +67,13 @@ db.serialize(() => {
 
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+
+  // [B-1] 기존 DB 호환: docType 컬럼이 없으면 추가. 기존 행은 DEFAULT 'E' 로 백필됨.
+  db.run("ALTER TABLE expenditures ADD COLUMN docType TEXT NOT NULL DEFAULT 'E'", (err) => {
+    if (err && !/duplicate column name/i.test(err.message)) {
+      console.error('[DB Migrate] expenditures.docType 추가 실패:', err.message);
+    }
+  });
 
   // [버전 호환성] 기존 DB 마이그레이션
   const lockColumns = [

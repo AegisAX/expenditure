@@ -110,7 +110,10 @@ function checkAndMigrateDB() {
     const requiredColumns = [
         { name: 'locked_by_name', type: 'TEXT' },
         { name: 'locked_by_email', type: 'TEXT' },
-        { name: 'locked_at', type: 'TEXT' }
+        { name: 'locked_at', type: 'TEXT' },
+        // [B-1] docType 컬럼. 'E'(지출결의서, 기본) / 'G'(일반 기안).
+        //       기존 행은 'E' 로 백필된다.
+        { name: 'docType', type: "TEXT NOT NULL DEFAULT 'E'" }
     ];
     db.all("PRAGMA table_info(expenditures)", [], (err, columns) => {
         if (err) return console.error(">> [DB Error] 조회 실패:", err);
