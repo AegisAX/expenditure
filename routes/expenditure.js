@@ -350,7 +350,7 @@ router.post('/api/approve', (req, res) => {
                         const baseUrl = await getSiteUrl();
                         const appInfo = `${doc.appPos || doc.applicantPos} ${doc.appName || doc.applicantName}`;
                         await sendEmail(doc.applicantEmail, `[반려] ${meta.label} - ${doc.subject}`, makeEmailHtml(docNum, doc.subject, appInfo, '반려 알림', baseUrl));
-                    } catch(e) {}
+                    } catch(e) { console.error('[Mail dispatch error]', e.message); }
                 }
             });
             return;
@@ -428,7 +428,7 @@ router.post('/api/approve', (req, res) => {
                             const nextPerson = await getUserByPos(nextRole);
                             if (nextPerson && nextPerson.email) await sendEmail(nextPerson.email, `[결재요청] ${meta.label} - ${doc.subject}`, makeEmailHtml(newDocNum, doc.subject, appInfo, "결재 요청", baseUrl));
                         }
-                    } catch(e) {}
+                    } catch(e) { console.error('[Mail dispatch error]', e.message); }
                 });
             return;
         } else if (user.position === '재무국장' && docType === 'E') {
@@ -455,7 +455,7 @@ router.post('/api/approve', (req, res) => {
                     const nextPerson = await getUserByPos(nextRole);
                     if (nextPerson && nextPerson.email) await sendEmail(nextPerson.email, `[결재요청] ${meta.label} - ${doc.subject}`, makeEmailHtml(newDocNum, doc.subject, appInfo, "결재 요청", baseUrl));
                 }
-            } catch(e) {}
+            } catch(e) { console.error('[Mail dispatch error]', e.message); }
         });
     });
 });

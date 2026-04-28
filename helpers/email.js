@@ -108,18 +108,35 @@ function makeEmailHtml(docNum, subject, applicantName, statusMsg, siteUrl) {
  */
 function sendEmail(to, subject, html) {
     if (!transporter) {
-        console.warn('[Mail Skip] transporter 미설정 상태 - 발송 생략:', subject);
-        return;
+        console.warn('[Mail Skip] transporter 미설정 - 발송 생략:', { to, subject });
+        return Promise.resolve(false);
     }
-    if (!to) return;
+    if (!to) {
+        console.warn('[Mail Skip] 수신자 누락 - 발송 생략:', { subject });
+        return Promise.resolve(false);
+    }
 
     const fromName = currentMailSettings.mail_from_name || '금오공고 총동문회 사무국';
     const fromAddr = currentMailSettings.smtp_user;
-    // nodemailer가 한글 표시명을 RFC 2047로 자동 인코딩함
     const from = `"${fromName}" <${fromAddr}>`;
 
-    transporter.sendMail({ from, to, subject, html }, (err) => {
-        if (err) console.error('[Mail Error]', err.message);
+    console.log('[Mail Send] 요청:', { to, subject });
+
+    // [B-6] Promise 기반으로 변경 — 호출자가 await 또는 .catch() 로 결과 처리 가능
+    return new Promise((resolve) => {
+        transporter.sendMail({ from, to, subject, html }, (err, info) => {
+            if (err) {
+                console.error('[Mail Error]', { to, subject, error: err.message });
+                return resolve(false);
+            }
+            console.log('[Mail Sent]', {
+                to,
+                subject,
+                messageId: info.messageId,
+                response: info.response
+            });
+            resolve(true);
+        });
     });
 }
 
