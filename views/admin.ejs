@@ -156,13 +156,29 @@
     .st-pending { background-color: #f39c12; } 
     .st-approved { background-color: #27ae60; }
     
-    .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; display: inline-block; min-width: 50px; }
+    .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; display: inline-block; min-width: 50px; white-space: nowrap; }
     .st-temp { background-color: #95a5a6; } 
     .st-req { background-color: #3498db; } 
     .st-ing { background-color: #f39c12; }
     .st-done { background-color: #27ae60; } 
     .st-paid { background-color: #2c3e50; } 
     .st-reject { background-color: #e74c3c; }
+    /* [B-4b] 일반 기안 결재완료 배지 */
+    .st-final-g { background-color: #2c3e50; }
+    /* [B-4b] 문서 유형 배지 (지출/기안) — 제목 셀 좌측 */
+    .doc-type-badge {
+        display: inline-block;
+        padding: 1px 5px;
+        font-size: 10px;
+        font-weight: bold;
+        border-radius: 3px;
+        margin-right: 4px;
+        vertical-align: middle;
+        line-height: 1.4;
+        color: #fff;
+    }
+    .doc-type-E { background-color: #2980b9; }
+    .doc-type-G { background-color: #16a085; }
 
     .doc-prefix { font-size: 11px; color: #888; margin-right: 2px; }
     .doc-serial { font-size: 12px; color: #333; }
@@ -491,6 +507,7 @@
                 else if(d.stage === '결재중') badgeClass = 'st-ing';
                 else if(d.stage === '최종결재') badgeClass = 'st-done';
                 else if(d.stage === '지급완료') badgeClass = 'st-paid';
+                else if(d.stage === '결재완료') badgeClass = 'st-final-g'; /* [B-4b] 일반 기안 종결 */
                 else if(d.stage === '반려') badgeClass = 'st-reject';
 
                 let prefix = ''; let serial = d.docNum;
@@ -500,9 +517,13 @@
                 }
                 if (d.docNum.startsWith('TEMP-')) { prefix = ''; serial = ''; }
 
+                /* [B-4b] 문서 유형 배지: G='기안' / E='지출' */
+                const docType = d.docType === 'G' ? 'G' : 'E';
+                const docTypeLabel = docType === 'G' ? '기안' : '지출';
+
                 return `<tr>
                     <td><span class="doc-prefix">${prefix}</span><span class="doc-serial">${serial}</span></td>
-                    <td style="text-align:left;">${escapeHtml(d.subject)}</td>
+                    <td style="text-align:left;"><span class="doc-type-badge doc-type-${docType}">${docTypeLabel}</span>${escapeHtml(d.subject)}</td>
                     <td>${escapeHtml(d.applicant)}</td>
                     <td><span class="badge ${badgeClass}">${d.stage}</span></td>
                     <td class="action-cell"><button class="action-btn btn-delete" onclick="deleteDoc('${d.docNum}')">삭제</button></td>
