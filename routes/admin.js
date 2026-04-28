@@ -144,21 +144,78 @@ router.post('/api/admin/user/delete', requireAdmin, (req, res) => {
     });
 });
 
+// [SECURITY] 직책 문자열이 '~장' 으로 끝나는지 (실장/회장/국장 등 모든 '장' 직책)
+function isLeaderPosition(pos) {
+    return typeof pos === 'string' && pos.length > 1 && pos.endsWith('장');
+}
+
+// 같은 대수 + 같은 '~장' 직책에 다른 사용자가 이미 있는지 검사.
+// excludeId: 자기 자신은 제외.
+// 결과: 충돌 발견 시 충돌 사용자 정보, 없으면 null
+function checkLeaderPositionConflict(generation, position, excludeId) {
+    return new Promise((resolve, reject) => {
+        if (!isLeaderPosition(position)) return resolve(null);
+        if (generation == null || generation === '') return resolve(null);
+        const sql = "SELECT id, email, name FROM users WHERE generation = ? AND position = ? AND id != ? LIMIT 1";
+        db.get(sql, [generation, position, excludeId || 0], (err, row) => {
+            if (err) return reject(err);
+            resolve(row || null);
+        });
+    });
+}
+
 router.post('/api/admin/user/update', requireAdmin, (req, res) => {
-    const { id, name, position, phone, generation, status, role, newPassword, signatureFile } = req.body;
+    const { id, email, name, position, phone, generation, status, role, newPassword, signatureFile } = req.body;
     db.get("SELECT * FROM users WHERE id = ?", [id], async (err, oldUser) => {
         if (err || !oldUser) return res.json({ status: 'Error', msg: '사용자를 찾을 수 없습니다.' });
-        let query = "UPDATE users SET name=?, position=?, phone=?, generation=?, status=?, role=?";
-        let params = [name, position, phone, generation, status, role];
+
+        // [B-fix] '~장' 직책 중복 검사 (같은 대수에서 1명만)
+        try {
+            const conflict = await checkLeaderPositionConflict(generation, position, id);
+            if (conflict) {
+                return res.json({
+                    status: 'Error',
+                    msg: `같은 대수(${generation}대)에 이미 '${position}' 직책의 사용자가 있습니다: ${conflict.name} (${conflict.email})`
+                });
+            }
+        } catch (e) {
+            return res.json({ status: 'Error', msg: '직책 중복 확인 실패: ' + e.message });
+        }
+
+        // [B-fix] 이메일 변경 처리 (입력값 trim, 형식 검증, UNIQUE 충돌 사전 검사)
+        let newEmail = (email || '').trim();
+        if (!newEmail) return res.json({ status: 'Error', msg: '이메일은 필수입니다.' });
+        const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRe.test(newEmail)) return res.json({ status: 'Error', msg: '이메일 형식이 올바르지 않습니다.' });
+
+        if (newEmail !== oldUser.email) {
+            // 다른 사용자가 이미 사용 중인지 확인
+            try {
+                await new Promise((resolve, reject) => {
+                    db.get("SELECT id FROM users WHERE email = ? AND id != ?", [newEmail, id], (e, row) => {
+                        if (e) return reject(e);
+                        if (row) return reject(new Error(`이미 사용 중인 이메일입니다: ${newEmail}`));
+                        resolve();
+                    });
+                });
+            } catch (e) {
+                return res.json({ status: 'Error', msg: e.message });
+                // try/catch 의 return 은 외부 함수를 정상적으로 종료시킴
+            }
+        }
+
+        let query = "UPDATE users SET email=?, name=?, position=?, phone=?, generation=?, status=?, role=?";
+        let params = [newEmail, name, position, phone, generation, status, role];
         let changes = [];
+        if (oldUser.email != newEmail) changes.push(`이메일: ${oldUser.email} -> ${newEmail}`);
         if (oldUser.name != name) changes.push(`이름: ${oldUser.name} -> ${name}`);
         if (oldUser.position != position) changes.push(`직책: ${oldUser.position} -> ${position}`);
         if (oldUser.phone != phone) changes.push(`전화: ${oldUser.phone} -> ${phone}`);
         if (oldUser.generation != generation) changes.push(`대수: ${oldUser.generation} -> ${generation}`);
         if (oldUser.status != status) changes.push(`상태: ${oldUser.status} -> ${status}`);
         if (oldUser.role != role) changes.push(`권한: ${oldUser.role} -> ${role}`);
+
         if (newPassword) {
-            // [수정] 비밀번호 복잡도 검증
             const pwErr = validatePassword(newPassword);
             if (pwErr) return res.json({ status: 'Error', msg: pwErr });
             const hash = await bcrypt.hash(newPassword, 10);
@@ -166,11 +223,21 @@ router.post('/api/admin/user/update', requireAdmin, (req, res) => {
             params.push(hash);
             changes.push("비밀번호: 변경됨");
         }
-        if (signatureFile && signatureFile.data) { const fname = await saveFile(signatureFile.data, signatureFile.type, 'SIG'); query += ", signature_path=?"; params.push(fname); changes.push("서명: 변경됨"); }
+        if (signatureFile && signatureFile.data) { 
+            const fname = await saveFile(signatureFile.data, signatureFile.type, 'SIG'); 
+            query += ", signature_path=?"; 
+            params.push(fname); 
+            changes.push("서명: 변경됨"); 
+        }
         query += " WHERE id=?";
         params.push(id);
         db.run(query, params, (updateErr) => {
-            if (updateErr) return res.json({ status: 'Error', msg: updateErr.message });
+            if (updateErr) {
+                if (/UNIQUE constraint failed: users.email/i.test(updateErr.message)) {
+                    return res.json({ status: 'Error', msg: '이미 사용 중인 이메일입니다.' });
+                }
+                return res.json({ status: 'Error', msg: updateErr.message });
+            }
             const logDetail = changes.length > 0
                 ? `관리자 정보 수정 (ID: ${id}, 대상: ${oldUser.name}) - [ ${changes.join(', ')} ]`
                 : `관리자 정보 수정 (ID: ${id}, 대상: ${oldUser.name}) - 변경 사항 없음`;
@@ -181,9 +248,29 @@ router.post('/api/admin/user/update', requireAdmin, (req, res) => {
 });
 
 router.post('/api/admin/user/approve', requireAdmin, (req, res) => {
-    db.run("UPDATE users SET status = 'Approved' WHERE id = ?", [req.body.id], (err) => {
-        if (!err) logAction(req, 'ADMIN_USER_APPROVE', `사용자 가입 승인 (대상ID: ${req.body.id})`);
-        res.json({ status: 'Success', msg: '승인되었습니다.' });
+    const id = req.body.id;
+    // 승인 전에 해당 사용자의 직책/대수 조회
+    db.get("SELECT id, generation, position, name, email FROM users WHERE id = ?", [id], async (err, user) => {
+        if (err || !user) return res.json({ status: 'Error', msg: '사용자를 찾을 수 없습니다.' });
+
+        // [B-fix] '~장' 직책 중복 검사
+        try {
+            const conflict = await checkLeaderPositionConflict(user.generation, user.position, user.id);
+            if (conflict) {
+                return res.json({
+                    status: 'Error',
+                    msg: `같은 대수(${user.generation}대)에 이미 '${user.position}' 직책의 사용자가 있습니다: ${conflict.name} (${conflict.email}). 직책을 먼저 수정하거나 기존 사용자의 직책을 변경한 후 승인해 주세요.`
+                });
+            }
+        } catch (e) {
+            return res.json({ status: 'Error', msg: '직책 중복 확인 실패: ' + e.message });
+        }
+
+        db.run("UPDATE users SET status = 'Approved' WHERE id = ?", [id], (uerr) => {
+            if (uerr) return res.json({ status: 'Error', msg: uerr.message });
+            logAction(req, 'ADMIN_USER_APPROVE', `사용자 가입 승인 (대상ID: ${id}, 직책: ${user.position}/${user.generation}대)`);
+            res.json({ status: 'Success', msg: '승인되었습니다.' });
+        });
     });
 });
 

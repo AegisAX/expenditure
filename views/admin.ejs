@@ -131,7 +131,7 @@
 
     .form-group { margin-bottom: 15px; }
     label { display: block; font-weight: bold; margin-bottom: 6px; font-size: 14px; color: #555; }
-    input[type="text"], input[type="password"], select { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; outline: none; transition: 0.2s; }
+    input[type="text"], input[type="password"], input[type="email"], select { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; outline: none; transition: 0.2s; }
     input:focus, select:focus { border-color: #3498db; }
     
     .btn-common { padding: 10px 20px; border-radius: 6px; border: none; cursor: pointer; font-weight: bold; font-size: 14px; transition: 0.2s; }
@@ -256,6 +256,8 @@
         .doc-prefix { display: block; margin-bottom: 0; line-height: 1.1; font-size: 10px; color: #555; word-break: keep-all; letter-spacing: -0.5px; }
         .doc-serial { display: block; line-height: 1.2; font-size: 11px; margin-top: 1px; }
     }
+
+    .hidden { display: none; }
   </style>
 </head>
 <body>
@@ -391,10 +393,30 @@
       <div class="modal-header"><span>사용자 정보 수정</span><span class="close-btn" onclick="closeModal()">&times;</span></div>
       <div class="modal-body">
         <input type="hidden" id="edit-id">
-        <div class="form-group"><label>이메일 (수정 불가)</label><input type="text" id="edit-email" disabled style="background:#f1f1f1;"></div>
+        <div class="form-group">
+            <label>이메일</label>
+            <input type="email" id="edit-email" placeholder="user@example.com">
+            <div style="font-size:11px; color:#888; margin-top:4px;">※ 이메일은 로그인 ID로 사용됩니다. 변경 시 사용자에게 안내해 주세요.</div>
+        </div>
         <div class="form-group"><label>이름</label><input type="text" id="edit-name"></div>
         <div class="form-group"><label>대수</label><select id="edit-gen"></select></div>
-        <div class="form-group"><label>직책</label><input type="text" id="edit-pos"></div>
+        <div class="form-group">
+            <label>직책</label>
+            <select id="edit-pos-select" onchange="toggleEditPosInput(this)">
+                <option value="" disabled>- 선택 -</option>
+                <option value="총동문회장">총동문회장</option>
+                <option value="수석부회장">수석부회장</option>
+                <option value="사무총장">사무총장</option>
+                <option value="기획국장">기획국장</option>
+                <option value="총무국장">총무국장</option>
+                <option value="재무국장">재무국장</option>
+                <option value="편집국장">편집국장</option>
+                <option value="문화국장">문화국장</option>
+                <option value="일반회원">일반회원</option>
+                <option value="DIRECT">직접입력</option>
+            </select>
+            <input type="text" id="edit-pos-input" class="hidden" placeholder="직책 입력" style="margin-top:5px;">
+        </div>
         <div class="form-group"><label>휴대폰 번호</label><input type="text" id="edit-phone" maxlength="13" oninput="autoHyphen(this)"></div>
         <div class="form-group" style="display:flex; gap:10px;">
             <div style="flex:1;"><label>상태</label><select id="edit-status"><option value="Pending">대기 (Pending)</option><option value="Approved">승인 (Approved)</option></select></div>
@@ -713,33 +735,78 @@
     }
 
     let allUsers = [];
+
+    // 가입 화면과 동일한 직책 옵션 목록 (미리 정의된 직책)
+    const PRESET_POSITIONS = [
+        '총동문회장', '수석부회장', '사무총장',
+        '기획국장', '총무국장', '재무국장', '편집국장', '문화국장',
+        '일반회원'
+    ];
+
     function openModal(id) {
         const u = allUsers.find(x => x.id === id);
         if(!u) return;
         document.getElementById('edit-id').value = u.id;
         document.getElementById('edit-email').value = u.email;
         document.getElementById('edit-name').value = u.name;
-        document.getElementById('edit-pos').value = u.position;
         document.getElementById('edit-phone').value = u.phone || "";
         document.getElementById('edit-gen').value = u.generation || "";
         document.getElementById('edit-status').value = u.status;
         document.getElementById('edit-role').value = u.role;
+
+        // 직책: 프리셋에 있으면 select 로, 없으면 직접입력 모드로
+        const posSelect = document.getElementById('edit-pos-select');
+        const posInput = document.getElementById('edit-pos-input');
+        if (PRESET_POSITIONS.includes(u.position)) {
+            posSelect.value = u.position;
+            posInput.classList.add('hidden');
+            posInput.value = '';
+        } else {
+            posSelect.value = 'DIRECT';
+            posInput.classList.remove('hidden');
+            posInput.value = u.position || '';
+        }
         document.getElementById('editModal').style.display = 'flex';
     }
+
+    // 가입 화면의 toggleDirectInput 와 동일 로직
+    function toggleEditPosInput(el) {
+        const input = document.getElementById('edit-pos-input');
+        if (el.value === 'DIRECT') {
+            input.classList.remove('hidden');
+            input.focus();
+        } else {
+            input.classList.add('hidden');
+            input.value = '';
+        }
+    }
+
     function closeModal() { document.getElementById('editModal').style.display = 'none'; }
 
     function submitEdit() {
         const id = document.getElementById('edit-id').value;
+        const email = document.getElementById('edit-email').value.trim();
         const name = document.getElementById('edit-name').value;
-        const pos = document.getElementById('edit-pos').value;
         const phone = document.getElementById('edit-phone').value;
         const gen = document.getElementById('edit-gen').value;
         const status = document.getElementById('edit-status').value;
         const role = document.getElementById('edit-role').value;
         const pw = document.getElementById('edit-pw').value;
         const f = document.getElementById('edit-sig');
-        if(!name || !pos) return Swal.fire('알림', '이름과 직책은 필수입니다.', 'warning');
-        const p = { id, name, position: pos, phone, generation: gen, status, role, newPassword: pw };
+
+        // 직책: select 또는 직접입력
+        const posSelect = document.getElementById('edit-pos-select');
+        let pos = posSelect.value;
+        if (!pos) return Swal.fire('알림', '직책을 선택해주세요.', 'warning');
+        if (pos === 'DIRECT') {
+            pos = document.getElementById('edit-pos-input').value.trim();
+            if (!pos) return Swal.fire('알림', '직책을 입력해주세요.', 'warning');
+        }
+
+        if(!email) return Swal.fire('알림', '이메일은 필수입니다.', 'warning');
+        if(!name) return Swal.fire('알림', '이름은 필수입니다.', 'warning');
+
+        const p = { id, email, name, position: pos, phone, generation: gen, status, role, newPassword: pw };
         if (f.files.length > 0) {
             const r = new FileReader();
             r.onload = ev => { p.signatureFile = { data: ev.target.result.split(',')[1], type: f.files[0].type }; sendEditRequest(p); }; r.readAsDataURL(f.files[0]);
