@@ -134,7 +134,9 @@ router.get('/form', async (req, res) => {
     };
 
     if (!docNum) {
-        return res.render('ExpenditureForm', { user, mode: 'WRITE', docNum: '', initDataJSON: serialize({}, { isJSON: true }), ...commonData, listPage, listKeyword, listAuthor });
+        // [B-5a] 신규 작성: 쿼리 ?type=G 면 일반 기안, 그 외는 모두 지출결의서('E')
+        const docType = req.query.type === 'G' ? 'G' : 'E';
+        return res.render('ExpenditureForm', { user, mode: 'WRITE', docNum: '', docType, initDataJSON: serialize({}, { isJSON: true }), ...commonData, listPage, listKeyword, listAuthor });
     }
 
     db.get("SELECT * FROM expenditures WHERE docNum = ?", [docNum], (err, doc) => {
@@ -155,7 +157,9 @@ router.get('/form', async (req, res) => {
         doc.applicantPhone = doc.applicantPhone || doc.appPhone;
         let mode = 'VIEW';
         if (doc.applicantEmail === user.email && ['작성중', '반려'].includes(doc.status)) mode = 'WRITE';
-        res.render('ExpenditureForm', { user, mode, docNum, initDataJSON: serialize(doc, { isJSON: true }), ...commonData, listPage, listKeyword, listAuthor });
+        // [B-5a] 기존 문서: DB의 docType을 신뢰 (클라이언트 쿼리 무시)
+        const docType = doc.docType === 'G' ? 'G' : 'E';
+        res.render('ExpenditureForm', { user, mode, docNum, docType, initDataJSON: serialize(doc, { isJSON: true }), ...commonData, listPage, listKeyword, listAuthor });
     });
 });
 

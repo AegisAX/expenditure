@@ -505,14 +505,29 @@
 	@media screen and (max-width: 600px) {
 	  .slash-mark { font-size: 24px; }
 	}
+
+  /* [B-5b] G 모드(일반 기안) 전용 스타일 — 지출 전용 영역 숨김 + 본문 확대 */
+  body.mode-G #row-req-pay-date,
+  body.mode-G #section-items-header,
+  body.mode-G #section-items-table,
+  body.mode-G #add-btn-area {
+    display: none !important;
+  }
+  body.mode-G #bodyContent {
+    min-height: 480px;       /* 집행내역 영역이 비는 만큼 본문 확대 */
+  }
   </style>
 </head>
-<body>
+<body class="mode-<%= docType %>">
   <div id="splash-screen"><div class="loader"></div><div class="loading-text">문서 불러오는 중...</div></div>
   <script type="application/json" id="initData"><%- initDataJSON %></script>
+  <script>
+    /* [B-5b] 클라이언트 JS 에서 docType 분기에 사용 */
+    window.docType = '<%= docType %>';
+  </script>
 
   <div class="page">
-    <div class="main-title">회비 집행 및 지출결의서</div>
+    <div class="main-title"><%= docType === 'G' ? '일반기안문' : '지출결의서' %></div>
     
 	<div id="form-content"> 
 		<table class="processor-table">
@@ -566,7 +581,7 @@
 		  </tr>
 		  <tr><td class="label">시&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;행</td><td class="content-cell"><input type="text" id="exec" disabled placeholder="금오공고 총동문회 사무국"></td></tr>
 		  <tr><td class="label">시 행 일 자</td><td class="content-cell"><input type="text" id="execDate" disabled placeholder="(자동 생성)"></td></tr>
-		  <tr>
+		  <tr id="row-req-pay-date">
 			  <td class="label">지출요청일</td>
 			  <td class="content-cell"><input type="text" id="reqDate" disabled placeholder="(자동 생성)"></td>
 			  <td colspan="2" class="label">지 급 일 자</td>
@@ -587,9 +602,9 @@
 		  </tr>
 		</table>
 
-		<div style="font-weight: bold; margin: 20px 0 8px 5px;">[ 집행내역 ]</div>
+    <div id="section-items-header" style="font-weight: bold; margin: 20px 0 8px 5px;">[ 집행내역 ]</div>
 		
-		<div class="table-scroll-wrapper">
+		<div id="section-items-table" class="table-scroll-wrapper">
 		  <table id="itemTable" class="item-table">
 			<colgroup>
 				<col style="width: 40px;">
@@ -619,13 +634,14 @@
 		  </table>
 		</div>
 		
-		<div class="btn-area" id="add-btn-area"><button class="add-btn" type="button" onclick="window.addRow()">+ 내역 추가</button></div>
+    <div class="btn-area" id="add-btn-area"><button class="add-btn" type="button" onclick="window.addRow()">+ 내역 추가</button></div>
 
 		<table>
 		  <tr>
-			<td class="label attach-label" style="height: 60px;">증빙자료</td>
+			<tr>
+			<td class="label attach-label" style="height: 60px;"><%= docType === 'G' ? '첨부파일' : '증빙자료' %></td>
 			<td colspan="3" class="content-cell" style="padding: 10px; font-size: 12px; line-height: 1.6;">
-        <span id="att-guide-text">별첨 : 증빙 서류를 첨부해 주세요. (JPG, PNG, GIF, WEBP, PDF · 파일당 최대 25MB · 다중 선택 가능)</span>
+        <span id="att-guide-text"><%= docType === 'G' ? '별첨 : 첨부 파일이 있으면 추가해 주세요. (JPG, PNG, GIF, WEBP, PDF · 파일당 최대 25MB · 선택 사항)' : '별첨 : 증빙 서류를 첨부해 주세요. (JPG, PNG, GIF, WEBP, PDF · 파일당 최대 25MB · 다중 선택 가능)' %></span>
 			  <div id="file-list"></div>
 			  <div id="new-file-area" style="margin-top:5px; display:none;">
 				<input type="file" id="attachment" multiple accept="image/*, application/pdf" onchange="window.handleFileSelect(this)">
@@ -842,7 +858,8 @@
             total += totalVal;
         }
 
-        if(status === '제출완료' && newFilesQueue.length === 0 && existingFiles.length === 0) {
+        // [B-5b] 지출결의서('E')만 첨부파일 필수. 일반 기안('G')은 선택.
+        if(window.docType !== 'G' && status === '제출완료' && newFilesQueue.length === 0 && existingFiles.length === 0) {
             return Swal.fire({ icon: 'warning', title: '증빙 누락', text: '증빙 서류(영수증 등)를 첨부해 주세요.' }).then(() => { 
                 const fileInput = document.getElementById('attachment');
                 setTimeout(() => { fileInput.focus(); fileInput.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300); 
@@ -856,6 +873,7 @@
 
         const formData = new FormData();
         formData.append('docNum', dNum);
+        formData.append('docType', window.docType || 'E');   /* [B-5b] G 모드 식별용 */
         formData.append('subject', subj.value);
         formData.append('bodyContent', bodyC.value);
         formData.append('totalAmount', total);
