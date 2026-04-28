@@ -825,7 +825,8 @@
         const recallableStatus = ['제출완료', '결재중'].includes(initData.status);
 
         if (isMyDoc && recallableStatus) html += `<button class="temp-btn" style="background:#d35400;" onclick="recallDoc()">문서 회수 (수정)</button> `;
-        if (initData.status === "지급완료") html += `<button class="print-btn" onclick="printDoc()">인쇄 / PDF 저장</button> `;
+        // [B-5b] 종결 상태(E='지급완료' / G='결재완료') 모두 인쇄/PDF 저장 가능
+        if (initData.status === "지급완료" || initData.status === "결재완료") html += `<button class="print-btn" onclick="printDoc()">인쇄 / PDF 저장</button> `;
         if (canSign) {
             html += `<button class="approve-btn" onclick="processApprove('APPROVE')">${myPos === '재무국장' ? '지급 완료(승인)' : '승인(결재)'}</button>`;
             if (myPos !== '재무국장') html += ` <button class="reject-btn" onclick="processApprove('REJECT')">반려</button>`;
@@ -1049,6 +1050,8 @@
         let hasVisibleAttachment = false;
 
         if (!attachmentIds) return;
+        // [B-5b] G 모드면 '첨부파일', E 모드면 '증빙자료'
+        const printLabel = window.docType === 'G' ? '첨부파일' : '증빙자료';
         const files = attachmentIds.split(',');
         
         for (let i = 0; i < files.length; i++) {
@@ -1061,11 +1064,11 @@
             let contentCreated = false;
 
             if (/\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(lower)) {
-                box.innerHTML = `<span class="print-att-label">[별첨 ${i+1}] 증빙자료: ${trimId}</span><img class="print-att-img" src="/api/download/${trimId}" loading="eager">`;
+                box.innerHTML = `<span class="print-att-label">[별첨 ${i+1}] ${printLabel}: ${trimId}</span><img class="print-att-img" src="/api/download/${trimId}" loading="eager">`;
                 contentCreated = true;
             } 
             else if (/\.pdf$/i.test(lower)) {
-                box.innerHTML = `<span class="print-att-label">[별첨 ${i+1}] 증빙자료: ${trimId}</span>`;
+                box.innerHTML = `<span class="print-att-label">[별첨 ${i+1}] ${printLabel}: ${trimId}</span>`;
                 const canvas = document.createElement('canvas');
                 try {
                     const loadingTask = pdfjsLib.getDocument(`/api/download/${trimId}`);
@@ -1169,14 +1172,16 @@
           // 화면 표시(innerText)는 displayName을 쓰고,
           // 실제 다운로드 링크(openPreview)는 전체 경로(trimId)를 사용
           const fileUrl = `/api/download/${trimId}`;
+          // [B-5b] G 모드면 '첨부파일', E 모드면 '증빙파일' 라벨
+          const fileLabelPrefix = window.docType === 'G' ? '첨부파일' : '증빙파일';
           div.innerHTML = 
           `
             <a href="#" onclick="window.openPreview('${fileUrl}', '${displayName}'); return false;" class="file-link">
-                증빙파일 ${idx+1}: ${displayName}
+                ${fileLabelPrefix} ${idx+1}: ${displayName}
             </a> 
             <button class="file-del-btn" style="display:none;" onclick="removeExistingFile('${trimId}', this)">삭제</button>
           `; 
-          list.appendChild(div); 
+          list.appendChild(div);
         });
         
         renderAttachmentsForPrint(d.attachmentIds);
@@ -1237,10 +1242,16 @@
 
         const docNum = document.getElementById('docNum').value || "문서번호없음";
         const applicant = initData.applicantName || "기안자";
-        let payDate = document.getElementById('payDate').value;
-        if(!payDate) payDate = new Date().toISOString().slice(0,10);
-        const cleanDate = payDate.replace(/-/g, '');
-        const newTitle = `지출결의서_${docNum}_${applicant}_${cleanDate}`;
+        // [B-5b] G 모드: 파일명 접두어 + 날짜는 executionDate(결재완료일) 사용
+        let dateStr = '';
+        if (window.docType === 'G') {
+            dateStr = document.getElementById('execDate').value || new Date().toISOString().slice(0,10);
+        } else {
+            dateStr = document.getElementById('payDate').value || new Date().toISOString().slice(0,10);
+        }
+        const cleanDate = dateStr.replace(/-/g, '');
+        const docTypeLabel = window.docType === 'G' ? '일반기안문' : '지출결의서';
+        const newTitle = `${docTypeLabel}_${docNum}_${applicant}_${cleanDate}`;
         const originalTitle = document.title;
         document.title = newTitle;
         window.print();
