@@ -80,7 +80,7 @@ function validatePassword(password) {
 }
 
 const registerValidator = validate([
-    body('email').isEmail().withMessage('유효한 이메일을 입력해주세요.').normalizeEmail(),
+    body('email').isEmail().withMessage('유효한 이메일을 입력해주세요.').trim(),
     body('password').custom(value => {
         const err = validatePassword(value);
         if (err) throw new Error(err);
@@ -93,7 +93,7 @@ const registerValidator = validate([
 ]);
 
 const loginValidator = validate([
-    body('email').isEmail().withMessage('이메일 형식이 올바르지 않습니다.').normalizeEmail(),
+    body('email').isEmail().withMessage('이메일 형식이 올바르지 않습니다.').trim(),
     body('password').notEmpty().withMessage('비밀번호를 입력해주세요.')
 ]);
 
