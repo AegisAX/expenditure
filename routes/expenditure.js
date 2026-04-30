@@ -332,7 +332,11 @@ router.post('/api/approve', (req, res) => {
             }
         }
         if (action !== 'REJECT' && isOwnDoc && user.role !== 'Admin') {
-            return res.json({ status: 'Error', msg: '본인이 기안한 문서는 직접 결재할 수 없습니다.' });
+            // [예외] '지급완료' 단계(재무국장)는 본인 기안 문서도 직접 결재 허용
+            const isPaymentStage = stageInfo && stageInfo.to === '지급완료';
+            if (!isPaymentStage) {
+                return res.json({ status: 'Error', msg: '본인이 기안한 문서는 직접 결재할 수 없습니다.' });
+            }
         }
 
         if (action === 'REJECT') {
