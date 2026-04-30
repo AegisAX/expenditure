@@ -150,6 +150,10 @@
     .action-btn { padding: 6px 12px; border-radius: 4px; border: none; cursor: pointer; color: white; font-size: 12px; margin: 0 2px; display: inline-block; }
     .btn-edit { background: #3498db; }
     .btn-delete { background: #e74c3c; }
+    /* 기본(PC): 이름 셀 안의 직책 라벨은 숨김 — 4번째 td 의 직책만 표시 */
+    .pos-label { display: none; }
+    /* 모바일 헤더 라벨 토글 */
+    .th-mo { display: none; }
     
     .status-badge { padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; color: white; display: inline-block; min-width: 50px; }
     .st-log { background-color: #34495e; padding: 4px 8px; border-radius: 4px; }
@@ -205,7 +209,8 @@
     .log-scroll { overflow-y: auto; border: 1px solid #eee; border-radius: 8px; background: #fafafa; }
     
     /* === [2. 모바일 반응형 스타일] === */
-    @media screen and (max-width: 600px) {
+    /* === [1단계] 900px 이하 — 큰 모바일/태블릿 (기존 동작) === */
+    @media screen and (max-width: 900px) {
         body { padding: 10px 0; background-color: #fff; }
         .container { padding: 15px; box-shadow: none; border-radius: 0; }
         
@@ -225,11 +230,8 @@
         .col-doc { width: 70px; } 
         .col-writer { width: 45px; } 
         .col-stat { width: 60px; } 
-        .col-manage-user { width: 80px; } 
         .col-manage-doc { width: 40px; }  
         .col-subj { width: auto; } 
-
-        .col-email, .col-gen { display: none; }
         
         .action-btn { padding: 4px 4px; font-size: 11px; margin: 0 1px; }
         
@@ -257,6 +259,53 @@
         .doc-serial { display: block; line-height: 1.2; font-size: 11px; margin-top: 1px; }
     }
 
+    /* === 사용자 관리 전용 — 700px 이하 5컬럼 (직책을 이름 셀에 통합) === */
+    @media screen and (max-width: 700px) {
+        .col-pos,
+        .col-role {
+            display: none;
+        }
+
+        /* 700px 이하: 콘텐츠 길이에 맞춰 자동 분배.
+        이메일을 제외한 모든 컬럼은 nowrap 으로 한 줄 유지.
+        공간이 부족하면 이메일이 우선적으로 줄바꿈. */
+        .user-table { table-layout: auto; }
+        .user-table td, .user-table th { padding: 8px 6px; }
+        .user-table thead th,
+        #userTableBody td {
+            white-space: nowrap;
+        }
+        /* 이메일만 줄바꿈 허용 */
+        #userTableBody td.col-email {
+            white-space: normal;
+            word-break: break-all;
+            font-size: 11px;
+            line-height: 1.3;
+        }
+
+        /* 이름 셀: 직책(작은 글씨, 첫 줄) + 이름(굵게, 둘째 줄) */
+        #userTableBody td:nth-child(1) {
+            font-size: 12px;
+            line-height: 1.4;
+        }
+        #userTableBody td:nth-child(1) .pos-label {
+            display: block;
+            font-size: 11px;
+            font-weight: normal;
+            color: #7f8c8d;
+        }
+        #userTableBody td:nth-child(1) .name-text {
+            display: block;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+    }
+
+    /* === 사용자 관리 전용 — 500px 이하 대수 컬럼 숨김 === */
+    @media screen and (max-width: 500px) {
+        .col-gen { display: none; }
+    }
+
     .hidden { display: none; }
   </style>
 </head>
@@ -268,10 +317,10 @@
     </div>
 
 <div class="section" onclick="toggleSection(this)">
-      <h3>1. 시스템 환경 설정</h3>
+      <h3>1. 환경 설정</h3>
       <div class="section-content">
           <div class="form-group">
-            <label>지출결의서 상단 주소 및 단체명</label>
+            <label>결재문서 상단 주소 및 단체명</label>
             <input type="text" id="setting-address" placeholder="예: 경상북도 구미시 ...">
           </div>
           <div class="form-group">
@@ -282,7 +331,6 @@
           <!-- [A-4] 메일(SMTP) 설정 영역 -->
           <hr style="margin:20px 0; border:0; border-top:1px dashed #ccc;">
           <div style="font-weight:bold; color:#34495e; margin-bottom:10px; font-size:15px;">📧 메일(SMTP) 설정</div>
-          <div class="section-desc">※ SMTP 설정은 저장 즉시 반영됩니다. 비밀번호는 보안상 마스킹(********) 되어 표시되며, 마스킹 상태로 저장하면 기존 값이 유지됩니다.</div>
 
           <div class="form-group" style="display:flex; gap:10px;">
               <div style="flex:3;">
@@ -294,13 +342,15 @@
                   <input type="text" id="setting-smtp-port" placeholder="465">
               </div>
           </div>
-          <div class="form-group">
-              <label>SMTP 계정 (발신 이메일)</label>
-              <input type="text" id="setting-smtp-user" placeholder="예: office@example.com">
-          </div>
-          <div class="form-group">
-              <label>SMTP 비밀번호 (또는 앱 비밀번호)</label>
-              <input type="password" id="setting-smtp-pass" placeholder="변경할 때만 새 비밀번호를 입력" autocomplete="new-password">
+          <div class="form-group" style="display:flex; gap:10px;">
+              <div style="flex:2;">
+                  <label>SMTP 계정</label>
+                  <input type="text" id="setting-smtp-user" placeholder="예: office@example.com">
+              </div>
+              <div style="flex:2;">
+                  <label>SMTP 비밀번호</label>
+                  <input type="password" id="setting-smtp-pass" placeholder="변경할 때만 새 비밀번호를 입력" autocomplete="new-password">
+              </div>
           </div>
           <div class="form-group">
               <label>발신자 표시명</label>
@@ -319,19 +369,17 @@
     <div class="section collapsed" onclick="toggleSection(this)">
       <h3>2. 사용자 관리</h3>
       <div class="section-content">
-          <div class="section-desc">※ [수정]/[삭제] 가능. [대기]/[잠김] 상태 클릭 시 즉시 승인/해제.</div>
           <div class="table-responsive"> 
-            <table>
+            <table class="user-table">
                 <colgroup>
-                    <col width="15%"> <col width="25%" class="col-email"> <col width="15%">
-                    <col width="10%" class="col-gen"> <col width="15%"> <col width="10%"> <col class="col-manage-user">
+                  <col width="15%"> <col width="25%" class="col-email">
+                  <col width="10%" class="col-gen"> <col width="15%" class="col-pos"> <col width="15%"> <col width="10%" class="col-role">
                 </colgroup>
-                <thead>
-                <tr>
-                    <th>이름</th> <th class="col-email">이메일</th> <th>직책</th>
-                    <th class="col-gen">대수</th> <th>상태</th> <th>권한</th> <th>관리</th>
-                </tr>
-                </thead>
+                <thead class="user-thead"><tr>
+                  <th><span class="th-pc">이름</span><span class="th-mo">사용자</span></th>
+                  <th class="col-email">이메일</th>
+                  <th class="col-gen">대수</th> <th class="col-pos">직책</th> <th>상태</th> <th class="col-role">권한</th>
+                </tr></thead>
                 <tbody id="userTableBody"></tbody>
             </table>
           </div>
@@ -339,7 +387,7 @@
     </div>
 
     <div class="section collapsed" onclick="toggleSection(this)">
-        <h3>3. 지출결의서 삭제 관리</h3>
+        <h3>3. 결재문서 관리</h3>
         <div class="section-content">
             <div class="section-desc" style="color:#c0392b; background:#fff5f5;">※ 주의: 삭제 시 복구 불가 (첨부파일 포함)</div>
             <div class="search-box">
@@ -426,9 +474,12 @@
         <div class="form-group"><label>비밀번호 초기화</label><input type="password" id="edit-pw" placeholder="비워두면 변경 안됨"></div>
         <div class="form-group"><label>서명 이미지</label><input type="file" id="edit-sig" accept="image/*"></div>
       </div>
-      <div class="modal-footer">
-          <button class="btn-common btn-close" onclick="closeModal()">취소</button>
-          <button class="btn-common btn-confirm" onclick="submitEdit()">저장하기</button>
+      <div class="modal-footer" style="justify-content:space-between;">
+          <button class="btn-common btn-delete" id="modal-delete-btn" onclick="deleteUserFromModal()" style="background:#e74c3c; color:white;">삭제</button>
+          <div style="display:flex; gap:10px;">
+              <button class="btn-common btn-close" onclick="closeModal()">취소</button>
+              <button class="btn-common btn-confirm" onclick="submitEdit()">저장하기</button>
+          </div>
       </div>
     </div>
   </div>
@@ -471,8 +522,6 @@
         });
     }
 
-    // ... (이하 기존 스크립트 함수들은 동일하므로 유지) ...
-    
     function loadAuditLogs(page) {
         currentLogPage = page || 1;
         fetch(`/api/admin/logs?page=${currentLogPage}&keyword=${encodeURIComponent(logKeyword)}`)
@@ -689,19 +738,22 @@
                 const isLocked = u.locked_until && new Date(u.locked_until) > new Date();
                 let bCls = isLocked ? 'st-reject' : (u.status === 'Pending' ? 'st-pending' : 'st-approved');
                 let bTxt = isLocked ? '잠김' : (u.status === 'Pending' ? '대기' : '승인');
-                let attr = isLocked ? `onclick="unlockUser(${u.id}, '${escapeHtml(u.name)}', this)"` : (u.status === 'Pending' ? `onclick="quickApproveUser(${u.id}, '${escapeHtml(u.name)}', this)"` : '');
-                
-                return `<tr>
-                    <td style="font-weight:bold;">${escapeHtml(u.name)}</td>
-                    <td class="col-email">${escapeHtml(u.email)}</td>
-                    <td>${escapeHtml(u.position)}</td>
-                    <td class="col-gen">${u.generation ? '제'+u.generation+'대' : '-'}</td>
-                    <td><span class="status-badge ${bCls}" ${attr} style="cursor:${attr?'pointer':'default'}">${bTxt}</span></td>
-                    <td>${u.role}</td>
-                    <td class="action-cell">
-                        <button class="action-btn btn-edit" onclick="openModal(${u.id})">수정</button>
-                        <button class="action-btn btn-delete" onclick="deleteUser(${u.id}, '${escapeHtml(u.name)}')">삭제</button>
+                // 배지 클릭은 기존 동작(즉시 승인/잠금해제) 유지하기 위해 별도 onclick 부여
+                const badgeClick = isLocked
+                    ? `event.stopPropagation(); unlockUser(${u.id}, '${escapeHtml(u.name)}', this)`
+                    : (u.status === 'Pending' ? `event.stopPropagation(); quickApproveUser(${u.id}, '${escapeHtml(u.name)}', this)` : '');
+
+                // [수정] 행 전체 클릭 시 수정 모달 (배지 영역 클릭은 stopPropagation 으로 방지)
+                return `<tr onclick="openModal(${u.id})" style="cursor:pointer;">
+                    <td style="font-weight:bold;">
+                        <span class="pos-label">${escapeHtml(u.position)}</span>
+                        <span class="name-text">${escapeHtml(u.name)}</span>
                     </td>
+                    <td class="col-email">${escapeHtml(u.email)}</td>
+                    <td class="col-gen">${u.generation ? '제'+u.generation+'대' : '-'}</td>
+                    <td class="col-pos">${escapeHtml(u.position)}</td>
+                    <td><span class="status-badge ${bCls}" ${badgeClick ? `onclick="${badgeClick}"` : ''} style="cursor:${badgeClick?'pointer':'default'}">${bTxt}</span></td>
+                    <td class="col-role">${u.role}</td>
                 </tr>`;
             }).join('');
         });
@@ -766,6 +818,12 @@
             posInput.classList.remove('hidden');
             posInput.value = u.position || '';
         }
+
+        // [개선] 본인 자신은 삭제 못 함 — 모달의 삭제 버튼 숨김
+        const deleteBtn = document.getElementById('modal-delete-btn');
+        if (deleteBtn) {
+            deleteBtn.style.visibility = (u.email === '<%= user.email %>') ? 'hidden' : 'visible';
+        }
         document.getElementById('editModal').style.display = 'flex';
     }
 
@@ -825,6 +883,35 @@
             if (r.isConfirmed) {
                 fetch('/api/admin/delete_doc', { method: 'POST', headers: { 'Content-Type': 'application/json', 'CSRF-Token': getCsrfToken() }, body: JSON.stringify({ docNum }) })
                 .then(r => r.json()).then(res => { Swal.fire('삭제됨', res.msg, 'success'); loadDocs(currentDocPage); });
+            }
+        });
+    }
+
+    // [개선] 모달 안에서 삭제 버튼 클릭. 확인 후 삭제 → 모달 닫고 목록 갱신
+    function deleteUserFromModal() {
+        const id = document.getElementById('edit-id').value;
+        const name = document.getElementById('edit-name').value;
+        if (!id) return;
+        Swal.fire({
+            title: '사용자 삭제',
+            text: `'${name}' 님의 계정을 삭제하시겠습니까? (복구 불가)`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#d33',
+            confirmButtonText: '삭제',
+            cancelButtonText: '취소'
+        }).then((r) => {
+            if (r.isConfirmed) {
+                fetch('/api/admin/user/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'CSRF-Token': getCsrfToken() },
+                    body: JSON.stringify({ id })
+                })
+                .then(r => r.json()).then(res => {
+                    Swal.fire('삭제됨', res.msg, 'success');
+                    closeModal();
+                    loadUsers();
+                });
             }
         });
     }

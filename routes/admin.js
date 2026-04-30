@@ -10,7 +10,7 @@ const { requireAdmin } = require('../middleware/auth');
 const { validatePassword } = require('../middleware/validators');
 const { reloadTransporter, sendEmail, getCurrentMailSettings } = require('../helpers/email');
 
-router.get('/admin', requireAdmin, (req, res) => res.render('admin'));
+router.get('/admin', requireAdmin, (req, res) => res.render('admin', { user: req.session.user }));
 
 // [A-3] 설정 조회: 기본 정보 + SMTP 설정(비밀번호는 마스킹)
 router.get('/api/admin/settings', requireAdmin, async (req, res) => {
@@ -138,7 +138,13 @@ router.post('/api/admin/user/unlock', requireAdmin, (req, res) => {
 });
 
 router.post('/api/admin/user/delete', requireAdmin, (req, res) => {
-    db.run("DELETE FROM users WHERE id = ?", [req.body.id], (err) => {
+    const targetId = req.body.id;
+    const myId = req.session.user && req.session.user.id;
+    // [개선] 본인 자신은 삭제 못 함
+    if (targetId && myId && Number(targetId) === Number(myId)) {
+        return res.json({ status: 'Error', msg: '본인 계정은 삭제할 수 없습니다.' });
+    }
+    db.run("DELETE FROM users WHERE id = ?", [targetId], (err) => {
         if (err) return res.json({ status: 'Error', msg: err.message });
         res.json({ status: 'Success', msg: '사용자가 삭제되었습니다.' });
     });
