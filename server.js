@@ -19,8 +19,13 @@ const adminRoutes       = require('./routes/admin');
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
+// 리버스 프록시 뒤에 있을 때 X-Forwarded-* 헤더를 신뢰
 app.set('trust proxy', 1);
 app.use(compression());
+
+// HTTPS 강제 관련 헤더(upgrade-insecure-requests, HSTS) 활성화 여부.
+// 모든 트래픽이 HTTPS인 환경에서만 true. 로컬 IP HTTP 접속을 함께 허용하려면 false.
+const HTTPS_ENFORCE = process.env.HTTPS_ENFORCE === 'true';
 
 const cspDirectives = {
     defaultSrc:  ["'self'"],
@@ -32,12 +37,19 @@ const cspDirectives = {
     fontSrc:     ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
     objectSrc:   ["'none'"],
 };
-if (process.env.NODE_ENV === 'production') cspDirectives.upgradeInsecureRequests = [];
+
+// HTTPS 강제면 추가, 아니면 helmet 기본값을 명시적으로 제거
+if (HTTPS_ENFORCE) {
+    cspDirectives.upgradeInsecureRequests = [];
+} else {
+    cspDirectives.upgradeInsecureRequests = null;   // ← 기본값 무력화
+}
 
 app.use(helmet({
     contentSecurityPolicy: { directives: cspDirectives },
     crossOriginEmbedderPolicy: false,
-    crossOriginResourcePolicy: { policy: "cross-origin" }
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    hsts: HTTPS_ENFORCE ? undefined : false   // HTTP 접속도 허용하려면 HSTS 끔
 }));
 
 app.set('view engine', 'ejs');
@@ -56,7 +68,7 @@ app.use(session({
     cookie: {
         httpOnly: true,
         maxAge: 30 * 60 * 1000,
-        secure: process.env.NODE_ENV === 'production',
+        secure: 'auto',          // ← 요청별로 자동 판단 (HTTPS면 secure, HTTP면 일반)
         sameSite: 'lax'
     }
 }));
