@@ -44,7 +44,7 @@ router.get('/list', (req, res) => {
     const offset = (currentPage - 1) * limit;
     const sanitizedKeyword = keyword.replace(/%/g, '').trim();
 
-    db.all("SELECT DISTINCT appName FROM expenditures WHERE appName IS NOT NULL AND appName != '' ORDER BY appName ASC", [], (err, authors) => {
+    db.all("SELECT DISTINCT appName FROM approvals WHERE appName IS NOT NULL AND appName != '' ORDER BY appName ASC", [], (err, authors) => {
         let whereClause = "WHERE 1=1";
         let params = [];
         if (sanitizedKeyword) {
@@ -61,7 +61,7 @@ router.get('/list', (req, res) => {
         }
         const countParams = user.role !== 'Admin' ? [...params, user.email, user.position, user.position] : params;
 
-        db.get(`SELECT COUNT(*) as total FROM expenditures ${whereClause} ${authClause}`, countParams, (err, countRow) => {
+        db.get(`SELECT COUNT(*) as total FROM approvals ${whereClause} ${authClause}`, countParams, (err, countRow) => {
             const totalDocs = countRow ? countRow.total : 0;
             const totalPages = Math.ceil(totalDocs / limit);
             const finalQuery = `
@@ -72,7 +72,7 @@ router.get('/list', (req, res) => {
                     (? = '총동문회장' AND status = '결재중') OR
                     (? = '재무국장' AND status = '최종결재')
                 ) as spotlight
-                FROM expenditures ${whereClause} ${authClause}
+                FROM approvals ${whereClause} ${authClause}
                 ORDER BY spotlight DESC,
                     CASE
                         WHEN status IN ('작성중', '반려', '제출완료', '결재중')
@@ -139,7 +139,7 @@ router.get('/form', async (req, res) => {
         return res.render('ExpenditureForm', { user, mode: 'WRITE', docNum: '', docType, initDataJSON: serialize({}, { isJSON: true }), ...commonData, listPage, listKeyword, listAuthor });
     }
 
-    db.get("SELECT * FROM expenditures WHERE docNum = ?", [docNum], (err, doc) => {
+    db.get("SELECT * FROM approvals WHERE docNum = ?", [docNum], (err, doc) => {
         if (err || !doc) return res.send(renderAlertHTML('존재하지 않거나 삭제된 문서입니다.'));
         if (doc.status === '작성중' && doc.applicantEmail !== user.email) return res.send(renderAlertHTML('기안자에 의해 회수된 문서입니다. 목록을 갱신합니다.'));
         if (doc.locked_at && doc.locked_by_email && doc.locked_by_email !== user.email) {
@@ -229,18 +229,18 @@ router.post('/api/submit', (req, res, next) => {
         const params = [finalDocNum, user.email, f.subject, f.bodyContent, f.totalAmount, finalReqDate, itemsStr, initialStatus, user.position, user.name, user.phone, user.signature_path, filePathsStr, docType];
 
         const afterSave = async () => {
-            db.run("UPDATE expenditures SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=?", [finalDocNum]);
+            db.run("UPDATE approvals SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=?", [finalDocNum]);
             // 본인 기안 시 자동 승인되는 결재 단계를 DB 에도 기록 (감사 추적용)
             const today = getTodayKST();
             if (user.position === '사무총장' && initialStatus === '결재중') {
                 db.run(
-                    "UPDATE expenditures SET secName=?, secSig=?, secDate=? WHERE docNum=?",
+                    "UPDATE approvals SET secName=?, secSig=?, secDate=? WHERE docNum=?",
                     [user.name, user.signature_path, today, finalDocNum]
                 );
             } else if (user.position === '총동문회장' && (initialStatus === '최종결재' || initialStatus === '결재완료')) {
                 // [B-2] 일반 기안의 자결재 종결('결재완료')도 동일하게 결재 흔적 기록
                 db.run(
-                    "UPDATE expenditures SET secName=?, secSig=?, secDate=?, presName=?, presSig=?, executionDate=? WHERE docNum=?",
+                    "UPDATE approvals SET secName=?, secSig=?, secDate=?, presName=?, presSig=?, executionDate=? WHERE docNum=?",
                     [user.name, user.signature_path, today, user.name, user.signature_path, today, finalDocNum]
                 );
             }
@@ -273,7 +273,7 @@ router.post('/api/submit', (req, res, next) => {
 
         // [B-2] 재제출 시 docType은 DB값을 그대로 유지(클라이언트가 변경 못 함).
         //       UPDATE 쿼리에는 docType을 포함하지 않으므로 자동 보존된다.
-        db.get("SELECT docNum, docType FROM expenditures WHERE docNum = ?", [finalDocNum], (err, row) => {
+        db.get("SELECT docNum, docType FROM approvals WHERE docNum = ?", [finalDocNum], (err, row) => {
             if (row) {
                 // 기존 문서 재제출: DB의 docType을 신뢰
                 docType = row.docType || 'E';
@@ -282,7 +282,7 @@ router.post('/api/submit', (req, res, next) => {
                 db.run(
                     // [수정] 회수·반려 후 재제출 시 기안자 정보 및 이전 결재자 흔적 초기화
                     //        이전 결재자 서명(secSig/presSig 등)이 DB에 잔존해 감사 트레일이 오염되는 문제를 해결
-                    "UPDATE expenditures SET \
+                    "UPDATE approvals SET \
                         subject=?, bodyContent=?, totalAmount=?, reqDate=?, items=?, status=?, file_paths=?, \
                         appPos=?, appName=?, appPhone=?, appSig=?, \
                         secName=NULL, secSig=NULL, secDate=NULL, \
@@ -296,7 +296,7 @@ router.post('/api/submit', (req, res, next) => {
                 );
             } else {
                 // 신규 작성: docType 포함하여 INSERT
-                db.run(`INSERT INTO expenditures (docNum, applicantEmail, subject, bodyContent, totalAmount, reqDate, items, status, appPos, appName, appPhone, appSig, file_paths, docType, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+                db.run(`INSERT INTO approvals (docNum, applicantEmail, subject, bodyContent, totalAmount, reqDate, items, status, appPos, appName, appPhone, appSig, file_paths, docType, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
                     params, (err) => err ? res.json({ msg: "DB 오류: " + err.message }) : afterSave());
             }
         });
@@ -312,7 +312,7 @@ router.post('/api/approve', (req, res) => {
     const { docNum, action } = req.body;
     const todayStr = getTodayKST();
 
-    db.get("SELECT * FROM expenditures WHERE docNum = ?", [docNum], async (err, doc) => {
+    db.get("SELECT * FROM approvals WHERE docNum = ?", [docNum], async (err, doc) => {
         if (!doc) return res.json({ msg: "문서를 찾을 수 없습니다." });
 
         // [B-2] docType 별 stage map 사용. doc.docType은 'E' 또는 'G'.
@@ -347,7 +347,7 @@ router.post('/api/approve', (req, res) => {
                 return res.json({ status: 'Error', msg: '반려 권한이 없습니다.' });
             }
             logAction(req, 'DOC_REJECT', `문서 반려 처리(${meta.label}): ${docNum}`);
-            db.run("UPDATE expenditures SET status='반려', locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=?", [docNum], async () => {
+            db.run("UPDATE approvals SET status='반려', locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=?", [docNum], async () => {
                 res.json({ msg: '반려되었습니다.' });
                 if (doc.applicantEmail) {
                     try {
@@ -370,7 +370,7 @@ router.post('/api/approve', (req, res) => {
         if (user.position === '사무총장') {
             nextStatus = stageInfo.to;       // 'E', 'G' 모두 '결재중'
             nextRole   = stageInfo.nextRole; // '총동문회장'
-            updateQuery = "UPDATE expenditures SET status=?, secName=?, secSig=?, secDate=? WHERE docNum=?";
+            updateQuery = "UPDATE approvals SET status=?, secName=?, secSig=?, secDate=? WHERE docNum=?";
             params = [nextStatus, user.name, user.signature_path, todayStr, docNum];
         } else if (user.position === '총동문회장') {
             // E: '최종결재'(재무국장 단계로) | G: '결재완료'(종결)
@@ -409,7 +409,7 @@ router.post('/api/approve', (req, res) => {
                     return res.json({ msg: "처리 중 오류가 발생하여 취소되었습니다." });
                 }
             }
-            db.run("UPDATE expenditures SET docNum=?, status=?, presName=?, presSig=?, executionDate=?, file_paths=? WHERE docNum=?",
+            db.run("UPDATE approvals SET docNum=?, status=?, presName=?, presSig=?, executionDate=?, file_paths=? WHERE docNum=?",
                 [newDocNum, nextStatus, user.name, user.signature_path, todayStr, newFilePaths, docNum],
                 async function(err) {
                     if (err) {
@@ -417,7 +417,7 @@ router.post('/api/approve', (req, res) => {
                         return res.json({ msg: "DB 저장 오류로 승인이 취소되었습니다.<br>관리자에게 문의하시기 바랍니다." });
                     }
                     logAction(req, 'DOC_APPROVE', `문서 승인(${meta.label}, ${nextStatus}): ${newDocNum}`);
-                    db.run("UPDATE expenditures SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=?", [newDocNum]);
+                    db.run("UPDATE approvals SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=?", [newDocNum]);
                     res.json({ msg: "승인 완료" });
                     try {
                         const baseUrl = await getSiteUrl();
@@ -439,7 +439,7 @@ router.post('/api/approve', (req, res) => {
             // 재무국장 단계는 지출결의서 전용
             nextStatus = stageInfo.to;       // '지급완료'
             nextRole   = stageInfo.nextRole; // null
-            updateQuery = "UPDATE expenditures SET status=?, payDate=? WHERE docNum=?";
+            updateQuery = "UPDATE approvals SET status=?, payDate=? WHERE docNum=?";
             params = [nextStatus, todayStr, docNum];
         }
 
@@ -448,7 +448,7 @@ router.post('/api/approve', (req, res) => {
         db.run(updateQuery, params, async (err) => {
             if (err) return res.json({ msg: err.message });
             logAction(req, 'DOC_APPROVE', `문서 승인(${meta.label}, ${nextStatus}): ${newDocNum}`);
-            db.run("UPDATE expenditures SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=?", [newDocNum]);
+            db.run("UPDATE approvals SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=?", [newDocNum]);
             res.json({ msg: "승인 완료" });
             try {
                 const baseUrl = await getSiteUrl();
@@ -507,10 +507,10 @@ router.post('/api/profile/update', async (req, res) => {
 
 router.post('/api/lock/acquire', (req, res) => {
     const timeout = new Date(Date.now() - 3 * 60 * 1000).toISOString();
-    db.run("UPDATE expenditures SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE locked_at < ?", [timeout]);
+    db.run("UPDATE approvals SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE locked_at < ?", [timeout]);
     const user = getUser(req);
     const { docNum } = req.body;
-    db.get("SELECT status, applicantEmail, locked_by_name, locked_by_email, locked_at FROM expenditures WHERE docNum = ?", [docNum], (err, row) => {
+    db.get("SELECT status, applicantEmail, locked_by_name, locked_by_email, locked_at FROM approvals WHERE docNum = ?", [docNum], (err, row) => {
         if (err || !row) return res.json({ status: 'Error', msg: '문서가 없습니다.' });
         if (['최종결재', '지급완료'].includes(row.status)) return res.json({ status: 'Success', message: 'Read-only mode (No lock required)' });
         if (row.status === '작성중' && user.email !== row.applicantEmail) return res.json({ status: 'Recalled', msg: '기안자에 의해 회수된 문서입니다.' });
@@ -521,7 +521,7 @@ router.post('/api/lock/acquire', (req, res) => {
                 return res.json({ status: 'Locked', msg: `현재 [${row.locked_by_name}]님이 ${actionMsg}` });
             }
         }
-        db.run("UPDATE expenditures SET locked_by_name=?, locked_by_email=?, locked_at=? WHERE docNum=?",
+        db.run("UPDATE approvals SET locked_by_name=?, locked_by_email=?, locked_at=? WHERE docNum=?",
             [user.name, user.email, new Date().toISOString(), docNum],
             (err) => err ? res.json({ status: 'Error', msg: err.message }) : res.json({ status: 'Success' }));
     });
@@ -530,7 +530,7 @@ router.post('/api/lock/acquire', (req, res) => {
 router.post('/api/lock/release', (req, res) => {
     const user = getUser(req);
     const { docNum } = req.body;
-    db.run("UPDATE expenditures SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=? AND locked_by_email=?",
+    db.run("UPDATE approvals SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=? AND locked_by_email=?",
         [docNum, user.email],
         function(err) { res.json(err ? { status: 'Error' } : { status: 'Success' }); }
     );
@@ -539,7 +539,7 @@ router.post('/api/lock/release', (req, res) => {
 router.post('/api/recall', (req, res) => {
     const user = getUser(req);
     const { docNum } = req.body;
-    db.run(`UPDATE expenditures SET status='작성중', secName=NULL, secSig=NULL, secDate=NULL, presName=NULL, presSig=NULL, executionDate=NULL, locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=? AND applicantEmail=? AND status IN ('제출완료', '결재중')`,
+    db.run(`UPDATE approvals SET status='작성중', secName=NULL, secSig=NULL, secDate=NULL, presName=NULL, presSig=NULL, executionDate=NULL, locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=? AND applicantEmail=? AND status IN ('제출완료', '결재중')`,
         [docNum, user.email], function(err) {
             if (err) return res.json({ status: 'Error', msg: err.message });
             if (this.changes === 0) return res.json({ status: 'Error', msg: '회수할 수 없는 상태입니다.' });
@@ -565,7 +565,7 @@ router.get('/api/download/*', (req, res) => {
     }
     // 콤마 경계 매칭으로 부분일치 오매칭 방지
     db.get(
-        "SELECT applicantEmail, status FROM expenditures WHERE ',' || file_paths || ',' LIKE ?",
+        "SELECT applicantEmail, status FROM approvals WHERE ',' || file_paths || ',' LIKE ?",
         [`%,${relativePath},%`],
         async (err, row) => {
             if (err) return res.status(500).send("시스템 오류");
@@ -605,7 +605,7 @@ router.post('/api/file/delete', async (req, res) => {
     // [보안] 파일이 속한 문서의 소유자인지 확인
     // 콤마 경계 매칭으로 부분일치 오매칭 방지
     db.get(
-        "SELECT docNum, file_paths, applicantEmail FROM expenditures WHERE ',' || file_paths || ',' LIKE ?",
+        "SELECT docNum, file_paths, applicantEmail FROM approvals WHERE ',' || file_paths || ',' LIKE ?",
         [`%,${fileId},%`],
         async (err, row) => {
             if (err) return res.json({ status: 'Error', msg: 'DB 조회 실패' });
@@ -629,7 +629,7 @@ router.post('/api/file/delete', async (req, res) => {
 
             // [수정] DB 먼저 갱신 → 성공 시 물리 파일 삭제 (DB 실패 시 파일 보존)
             const paths = row.file_paths.split(',').map(s => s.trim()).filter(p => p !== fileId && p !== '');
-            db.run("UPDATE expenditures SET file_paths = ? WHERE docNum = ?",
+            db.run("UPDATE approvals SET file_paths = ? WHERE docNum = ?",
                 [paths.join(','), row.docNum], async (updateErr) => {
                     if (updateErr) return res.json({ status: 'Error', msg: 'DB 업데이트 실패' });
                     try { await fs.promises.unlink(safePath); } catch (e) {

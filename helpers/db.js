@@ -60,7 +60,7 @@ function getSiteUrl() {
 function clearStaleLocks() {
     // [수정] lock acquire/form 체크와 동일한 3분 기준으로 통일
     const timeout = new Date(Date.now() - 3 * 60 * 1000).toISOString();
-    db.run("UPDATE expenditures SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE locked_at < ?", [timeout]);
+    db.run("UPDATE approvals SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE locked_at < ?", [timeout]);
 }
 
 function logAction(req, action, details) {
@@ -115,15 +115,15 @@ function checkAndMigrateDB() {
         //       기존 행은 'E' 로 백필된다.
         { name: 'docType', type: "TEXT NOT NULL DEFAULT 'E'" }
     ];
-    db.all("PRAGMA table_info(expenditures)", [], (err, columns) => {
+    db.all("PRAGMA table_info(approvals)", [], (err, columns) => {
         if (err) return console.error(">> [DB Error] 조회 실패:", err);
         const existingNames = columns.map(c => c.name);
         let added = 0;
         requiredColumns.forEach(col => {
             if (!existingNames.includes(col.name)) {
-                db.run(`ALTER TABLE expenditures ADD COLUMN ${col.name} ${col.type}`, (err) => {
+                db.run(`ALTER TABLE approvals ADD COLUMN ${col.name} ${col.type}`, (err) => {
                     if (err && !/duplicate column name/i.test(err.message)) {
-                        console.error(`[DB Migrate Runtime] expenditures.${col.name} 추가 실패:`, err.message);
+                        console.error(`[DB Migrate Runtime] approvals.${col.name} 추가 실패:`, err.message);
                     }
                 });
                 added++;
@@ -142,7 +142,7 @@ function checkAndMigrateDB() {
                     db.run(
                         // presDate가 있는 행(= 총동문회장이 결재한 문서)은
                         // executionDate 기존값(기안일)과 무관하게 결재일로 덮어쓴다.
-                        `UPDATE expenditures SET executionDate = presDate
+                        `UPDATE approvals SET executionDate = presDate
                          WHERE presDate IS NOT NULL AND presDate != ''`,
                         (e) => {
                             if (!e) console.log(">> [DB Migrate] presDate -> executionDate 복사 완료.");
@@ -160,7 +160,7 @@ function checkAndMigrateDB() {
             for (const target of dropTargets) {
                 if (!existingNames.includes(target.col)) continue;
                 if (target.before) await target.before();
-                db.run(`ALTER TABLE expenditures DROP COLUMN ${target.col}`, (e) => {
+                db.run(`ALTER TABLE approvals DROP COLUMN ${target.col}`, (e) => {
                     if (!e) {
                         console.log(`>> [DB Migrate] 컬럼 삭제 완료: ${target.col}`);
                     } else {

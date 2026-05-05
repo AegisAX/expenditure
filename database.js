@@ -43,8 +43,8 @@ db.serialize(() => {
   // 2. Settings 테이블
   db.run(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`);
 
-  // 3. Expenditures 테이블
-  db.run(`CREATE TABLE IF NOT EXISTS expenditures (
+  // 3. Approvals 테이블 (예전 이름: expenditures, PHASE C 에서 리네이밍)
+  db.run(`CREATE TABLE IF NOT EXISTS approvals (
     docNum TEXT PRIMARY KEY,
     applicantEmail TEXT,
     subject TEXT,
@@ -69,9 +69,9 @@ db.serialize(() => {
   )`);
 
   // [B-1] 기존 DB 호환: docType 컬럼이 없으면 추가. 기존 행은 DEFAULT 'E' 로 백필됨.
-  db.run("ALTER TABLE expenditures ADD COLUMN docType TEXT NOT NULL DEFAULT 'E'", (err) => {
+  db.run("ALTER TABLE approvals ADD COLUMN docType TEXT NOT NULL DEFAULT 'E'", (err) => {
     if (err && !/duplicate column name/i.test(err.message)) {
-      console.error('[DB Migrate] expenditures.docType 추가 실패:', err.message);
+        console.error('[DB Migrate] approvals.docType 추가 실패:', err.message);   // 메시지 라벨 변경
     }
   });
 
@@ -82,9 +82,9 @@ db.serialize(() => {
     { name: 'locked_at',       type: 'DATETIME' }
   ];
   lockColumns.forEach(col => {
-    db.run(`ALTER TABLE expenditures ADD COLUMN ${col.name} ${col.type}`, (err) => {
+    db.run(`ALTER TABLE approvals ADD COLUMN ${col.name} ${col.type}`, (err) => {
       if (err && !/duplicate column name/i.test(err.message)) {
-        console.error(`[DB Migrate] expenditures.${col.name} 추가 실패:`, err.message);
+        console.error(`[DB Migrate] approvals.${col.name} 추가 실패:`, err.message);
       }
     });
   });

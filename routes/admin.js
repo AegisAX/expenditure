@@ -293,9 +293,9 @@ router.get('/api/admin/list', requireAdmin, (req, res) => {
     let whereClause = "WHERE 1=1";
     let params = [];
     if (keyword) { whereClause += " AND (docNum LIKE ? OR subject LIKE ? OR appName LIKE ?)"; const k = `%${keyword}%`; params.push(k, k, k); }
-    db.get(`SELECT COUNT(*) as count FROM expenditures ${whereClause}`, params, (err, countRow) => {
+    db.get(`SELECT COUNT(*) as count FROM approvals ${whereClause}`, params, (err, countRow) => {
         if (err) return res.json({ docs: [], total: 0 });
-        db.all(`SELECT * FROM expenditures ${whereClause} ORDER BY docNum DESC LIMIT ? OFFSET ?`, [...params, limit, offset], (err, rows) => {
+        db.all(`SELECT * FROM approvals ${whereClause} ORDER BY docNum DESC LIMIT ? OFFSET ?`, [...params, limit, offset], (err, rows) => {
             if (err) return res.json({ docs: [], total: 0 });
             // [B-3] 응답에 docType 추가 — 관리자 화면에서 유형 배지 표시용
             res.json({
@@ -316,7 +316,7 @@ router.get('/api/admin/list', requireAdmin, (req, res) => {
 
 router.post('/api/admin/delete_doc', requireAdmin, (req, res) => {
     const { docNum } = req.body;
-    db.get("SELECT file_paths FROM expenditures WHERE docNum = ?", [docNum], async (err, row) => {
+    db.get("SELECT file_paths FROM approvals WHERE docNum = ?", [docNum], async (err, row) => {
         if (err) return res.json({ status: 'Error', msg: 'DB 조회 실패' });
         if (!row) return res.json({ status: 'Error', msg: '문서가 존재하지 않습니다.' });
         if (row.file_paths) {
@@ -324,7 +324,7 @@ router.post('/api/admin/delete_doc', requireAdmin, (req, res) => {
                 try { await fs.promises.unlink(path.join(uploadDir, fileName.trim())); } catch (e) { console.error(`[Admin] 파일 삭제 실패: ${fileName}`, e.message); }
             }
         }
-        db.run("DELETE FROM expenditures WHERE docNum = ?", [docNum], (err) => {
+        db.run("DELETE FROM approvals WHERE docNum = ?", [docNum], (err) => {
             if (err) return res.json({ status: 'Error', msg: err.message });
             logAction(req, 'DELETE_DOC', `문서 영구 삭제: ${docNum}`);
             res.json({ status: 'Success', msg: '삭제되었습니다.' });
