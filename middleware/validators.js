@@ -101,7 +101,7 @@ const loginValidator = validate([
 //  - docType: 'G' 가 아니면 모두 'E' 로 강제 (화이트리스트)
 //  - totalAmount: 'G'면 0으로 강제, 'E'면 parseInt 후 라우터까지 숫자 타입으로 전달
 //                 정규화 실패 시 -1 로 두어 isInt({min:0}) 검증에서 자연스럽게 거부되도록 함
-function normalizeExpenditureBody(req, res, next) {
+function normalizeApprovalBody(req, res, next) {
     if (!req.body) return next();
     req.body.docType = (req.body.docType === 'G') ? 'G' : 'E';
     if (req.body.docType === 'G') {
@@ -114,7 +114,7 @@ function normalizeExpenditureBody(req, res, next) {
     next();
 }
 
-const expenditureValidator = validate([
+const approvalValidator = validate([
     body('status').isIn(['작성중', '제출완료']).withMessage('상태 값이 올바르지 않습니다.'),
 
     // [B-2] docType: 'E'(지출결의서, 기본) 또는 'G'(일반 기안)만 허용. 미지정·이상값은 'E'로 간주.
@@ -146,6 +146,6 @@ setInterval(() => {
 module.exports = {
     loginRateLimiter, recordLoginFailure, resetLoginAttempts,
     registerLimiter, registerValidator, loginValidator,
-    expenditureValidator, validatePassword,
-    normalizeExpenditureBody   // [B-2] 추가
+    approvalValidator, validatePassword,
+    normalizeApprovalBody   // [B-2] 추가
 };

@@ -8,7 +8,7 @@ const db = require('../database');
 const { uploadDir, upload, saveFile, MAX_UPLOAD_MB } = require('../helpers/file');
 const { getTodayKST, getUser, getUserByPos, getNextDocNum, getSiteUrl, logAction } = require('../helpers/db');
 const { makeEmailHtml, sendEmail } = require('../helpers/email');
-const { expenditureValidator, validatePassword, normalizeExpenditureBody } = require('../middleware/validators');
+const { approvalValidator, validatePassword, normalizeApprovalBody } = require('../middleware/validators');
 
 // [B-2] docType 별 메타 정보. 라벨/접두어/파일명 라벨 분기에 사용.
 //  - E: 지출결의서 (기존 플로우)
@@ -89,7 +89,7 @@ router.get('/list', (req, res) => {
             ];
             db.all(finalQuery, queryParams, (err, rows) => {
                 if (err) console.error("Query Error:", err);
-                res.render('ExpenditureList', { user, docs: rows || [], currentPage, totalPages, authors: authors || [], query: { keyword: sanitizedKeyword, author } });
+                res.render('ApprovalList', { user, docs: rows || [], currentPage, totalPages, authors: authors || [], query: { keyword: sanitizedKeyword, author } });
             });
         });
     });
@@ -136,7 +136,7 @@ router.get('/form', async (req, res) => {
     if (!docNum) {
         // [B-5a] 신규 작성: 쿼리 ?type=G 면 일반 기안, 그 외는 모두 지출결의서('E')
         const docType = req.query.type === 'G' ? 'G' : 'E';
-        return res.render('ExpenditureForm', { user, mode: 'WRITE', docNum: '', docType, initDataJSON: serialize({}, { isJSON: true }), ...commonData, listPage, listKeyword, listAuthor });
+        return res.render('ApprovalForm', { user, mode: 'WRITE', docNum: '', docType, initDataJSON: serialize({}, { isJSON: true }), ...commonData, listPage, listKeyword, listAuthor });
     }
 
     db.get("SELECT * FROM approvals WHERE docNum = ?", [docNum], (err, doc) => {
@@ -159,7 +159,7 @@ router.get('/form', async (req, res) => {
         if (doc.applicantEmail === user.email && ['작성중', '반려'].includes(doc.status)) mode = 'WRITE';
         // [B-5a] 기존 문서: DB의 docType을 신뢰 (클라이언트 쿼리 무시)
         const docType = doc.docType === 'G' ? 'G' : 'E';
-        res.render('ExpenditureForm', { user, mode, docNum, docType, initDataJSON: serialize(doc, { isJSON: true }), ...commonData, listPage, listKeyword, listAuthor });
+        res.render('ApprovalForm', { user, mode, docNum, docType, initDataJSON: serialize(doc, { isJSON: true }), ...commonData, listPage, listKeyword, listAuthor });
     });
 });
 
@@ -170,7 +170,7 @@ router.post('/api/submit', (req, res, next) => {
         if (err) return res.json({ status: 'Error', msg: err.code === 'LIMIT_FILE_SIZE' ? `파일 크기 초과 (${MAX_UPLOAD_MB}MB)` : err.message });
         next();
     });
-}, normalizeExpenditureBody, expenditureValidator, async (req, res) => {
+}, normalizeApprovalBody, approvalValidator, async (req, res) => {
     const user = getUser(req);
     const f = req.body;
     let finalDocNum = f.docNum || `TEMP-${Date.now()}`;

@@ -13,7 +13,7 @@ const { checkAndMigrateDB, clearStaleLocks } = require('./helpers/db');
 const { initTransporter } = require('./helpers/email');
 const { requireLogin } = require('./middleware/auth');
 const authRoutes        = require('./routes/auth');
-const expenditureRoutes = require('./routes/expenditure');
+const approvalRoutes = require('./routes/approval');
 const adminRoutes       = require('./routes/admin');
 
 const app  = express();
@@ -77,7 +77,7 @@ app.use(csrf());
 app.use((req, res, next) => { res.locals.csrfToken = req.csrfToken(); next(); });
 
 app.use('/', authRoutes);
-app.use('/', requireLogin, expenditureRoutes);
+app.use('/', requireLogin, approvalRoutes);
 app.use('/', requireLogin, adminRoutes);
 
 // /api/* 는 404 JSON 으로 분리, 나머지만 /login 으로 리다이렉트
