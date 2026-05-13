@@ -13,6 +13,15 @@ let currentMailSettings = {
     mail_from_name: ''
 };
 
+// SMTP 호스트가 IP 주소(IPv4/IPv6)인지 판별.
+// IP 일 경우 TLS 인증서 검증 우회 (자체 서명/사내망 자체 SMTP 서버 대응).
+function isIpAddress(host) {
+    if (!host) return false;
+    const ipv4 = /^(\d{1,3}\.){3}\d{1,3}$/;
+    const ipv6 = /:/;
+    return ipv4.test(host) || ipv6.test(host);
+}
+
 const MAIL_KEYS = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'mail_from_name'];
 
 /**
@@ -38,16 +47,23 @@ async function initTransporter() {
         }
 
         const port = parseInt(s.smtp_port, 10) || 465;
-        transporter = nodemailer.createTransport({
+        const transportConfig = {
             host: s.smtp_host,
             port,
-            secure: port === 465,     // 465 → SMTPS, 587 등은 STARTTLS
+            secure: port === 465,
             auth: { user: s.smtp_user, pass: s.smtp_pass },
             pool: true,
             maxConnections: 1,
             rateLimit: 3,
             connectionTimeout: 10000
-        });
+        };
+        // [개선] SMTP 호스트가 IP 주소면 TLS 인증서 검증 우회.
+        // 사내망 자체 서버 + 도메인 미발급 환경 대응. 인터넷 SMTP에는 도메인 사용 권장.
+        if (isIpAddress(s.smtp_host)) {
+            transportConfig.tls = { rejectUnauthorized: false };
+            console.warn('>> [Mail] SMTP 호스트가 IP 주소 - TLS 인증서 검증 우회 (보안 약화 주의).');
+        }
+        transporter = nodemailer.createTransport(transportConfig);
         console.log(`>> [Mail] Transporter 초기화 완료 (host=${s.smtp_host}, port=${port}, user=${s.smtp_user}).`);
     } catch (e) {
         transporter = null;
@@ -109,11 +125,11 @@ function makeEmailHtml(docNum, subject, applicantName, statusMsg, siteUrl) {
 function sendEmail(to, subject, html) {
     if (!transporter) {
         console.warn('[Mail Skip] transporter 미설정 - 발송 생략:', { to, subject });
-        return Promise.resolve(false);
+        return Promise.resolve({ success: false, error: 'SMTP 설정이 비어 있어 메일 기능이 비활성화 상태입니다.' });
     }
     if (!to) {
         console.warn('[Mail Skip] 수신자 누락 - 발송 생략:', { subject });
-        return Promise.resolve(false);
+        return Promise.resolve({ success: false, error: '수신자가 지정되지 않았습니다.' });
     }
 
     const fromName = currentMailSettings.mail_from_name || '금오공고 총동문회 사무국';
@@ -122,12 +138,11 @@ function sendEmail(to, subject, html) {
 
     console.log('[Mail Send] 요청:', { to, subject });
 
-    // [B-6] Promise 기반으로 변경 — 호출자가 await 또는 .catch() 로 결과 처리 가능
     return new Promise((resolve) => {
         transporter.sendMail({ from, to, subject, html }, (err, info) => {
             if (err) {
                 console.error('[Mail Error]', { to, subject, error: err.message });
-                return resolve(false);
+                return resolve({ success: false, error: err.message });
             }
             console.log('[Mail Sent]', {
                 to,
@@ -135,7 +150,7 @@ function sendEmail(to, subject, html) {
                 messageId: info.messageId,
                 response: info.response
             });
-            resolve(true);
+            resolve({ success: true });
         });
     });
 }

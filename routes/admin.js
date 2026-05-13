@@ -86,7 +86,7 @@ router.post('/api/admin/settings', requireAdmin, async (req, res) => {
 // [A-3] 테스트 메일 발송. 수신자 = 로그인한 관리자 본인.
 // 현재 transporter(= 저장된 설정 기준)로 실제 발송을 시도한다.
 // sendEmail은 fire-and-forget 이므로 응답은 "요청 수락"까지만 보장한다.
-router.post('/api/admin/settings/test-mail', requireAdmin, (req, res) => {
+router.post('/api/admin/settings/test-mail', requireAdmin, async (req, res) => {
     const user = req.session.user;
     if (!user || !user.email) {
         return res.status(400).json({ status: 'Error', msg: '관리자 이메일을 찾을 수 없습니다.' });
@@ -119,14 +119,29 @@ router.post('/api/admin/settings/test-mail', requireAdmin, (req, res) => {
         '</div>';
 
     try {
-        sendEmail(user.email, '[테스트] 금오공고 총동문회 전자결재 메일 설정 확인', html);
-        logAction(req, 'ADMIN_SETTINGS_TEST_MAIL', `테스트 메일 발송 요청: ${user.email}`);
-        res.json({
-            status: 'Success',
-            msg: `${user.email} 로 테스트 메일을 발송 요청했습니다. 수신을 확인해 주세요.`
-        });
+        // [개선] sendEmail 결과를 await 하여 실제 발송 성공/실패 분기
+        const result = await sendEmail(
+            user.email,
+            '[테스트] 금오공고 총동문회 전자결재 메일 설정 확인',
+            html
+        );
+
+        if (result.success) {
+            logAction(req, 'ADMIN_SETTINGS_TEST_MAIL', `테스트 메일 발송 성공: ${user.email}`);
+            return res.json({
+                status: 'Success',
+                msg: `${user.email} 로 테스트 메일이 발송되었습니다. 수신을 확인해 주세요.`
+            });
+        } else {
+            logAction(req, 'ADMIN_SETTINGS_TEST_MAIL_FAIL', `테스트 메일 발송 실패: ${user.email} (${result.error})`);
+            return res.json({
+                status: 'Error',
+                msg: '테스트 메일 발송에 실패했습니다.\n사유: ' + result.error
+            });
+        }
     } catch (e) {
-        res.status(500).json({ status: 'Error', msg: '테스트 메일 발송 중 오류: ' + e.message });
+        console.error('[Test Mail] 예외:', e);
+        return res.status(500).json({ status: 'Error', msg: '테스트 메일 발송 중 오류가 발생했습니다: ' + e.message });
     }
 });
 
