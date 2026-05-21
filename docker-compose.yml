@@ -14,4 +14,7 @@ services:
     environment:
       - NODE_ENV=production
       - TZ=Asia/Seoul
+      - HTTPS_ENFORCE=false   # DNS(HTTPS) + 로컬 IP(HTTP) 둘 다 허용. 외부엔 NPMplus가 HSTS 등 자체 추가.
     restart: always
+    extra_hosts:
+      - "mail.whitehat.kr:192.168.118.250"
