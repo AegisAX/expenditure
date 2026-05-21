@@ -159,13 +159,47 @@
         .mo-only { display: none; }
         /* 인라인 날짜: 모바일 전용 — 기본 숨김 */
         .mo-exec-inline, .mo-pay-inline { display: none; }
-        @media (max-width: 600px) {
+        @media (max-width: 900px) {
             .date-cell { font-size: 11px; letter-spacing: -0.3px; }
             .pc-only { display: none; }
             .mo-only { display: inline; }
         }
         .st-temp { background-color: #95a5a6; } .st-req { background-color: #3498db; } .st-ing { background-color: #f39c12; }
         .st-done { background-color: #27ae60; } .st-paid { background-color: #2c3e50; } .st-reject { background-color: #e74c3c; }
+        /* [B-4] 일반 기안 결재완료 — 지급완료와 동일한 종결 톤(짙은 남색) */
+        .st-final-g { background-color: #2c3e50; }
+        /* [B-4] 문서 유형 배지 (지출/기안) — 문서번호 셀 좌측 inline 표시 */
+        .doc-type-badge {
+            display: inline-block;
+            padding: 1px 5px;
+            font-size: 10px;
+            font-weight: bold;
+            border-radius: 3px;
+            margin-right: 4px;
+            vertical-align: middle;
+            line-height: 1.4;
+            color: #fff;
+        }
+        .doc-type-E { background-color: #2980b9; }  /* 지출결의서: 청색 */
+        .doc-type-G { background-color: #16a085; }  /* 일반 기안: 청록 */
+        /* [B-4] 제목 셀: 배지를 좌측에 고정하고 제목 텍스트는 별도 블록으로 줄바꿈 */
+        .col-subj-td {
+            text-align: left;
+            vertical-align: middle;
+        }
+        .col-subj-td > * {
+            vertical-align: middle;
+        }
+        .col-subj-td .doc-type-badge {
+            /* inline-block 그대로, 제목 첫 줄과 시각적으로 정렬 */
+            margin-right: 4px;
+        }
+        .col-subj-td .subj-text {
+            /* 배지와 같은 라인에서 시작하여 자연스럽게 줄바꿈 */
+            display: inline;
+            line-height: 1.5;
+            word-break: break-word;
+        }
         
         .pagination { display: flex; justify-content: center; gap: 5px; margin-top: 20px; padding-bottom: 20px; }
         .page-link { padding: 8px 12px; border: 1px solid #dee2e6; background: #fff; color: #2c3e50; text-decoration: none; border-radius: 4px; font-size: 13px; }
@@ -173,7 +207,7 @@
 
         .write-btn { position: fixed; bottom: 30px; right: 30px; width: 60px; height: 60px; border-radius: 50%; background-color: #2c3e50; color: white; border: none; box-shadow: 0 4px 15px rgba(0,0,0,0.3); cursor: pointer; display: flex; justify-content: center; align-items: center; font-size: 30px; z-index: 100; transition: transform 0.2s; }
 
-        @media (max-width: 600px) {
+        @media (max-width: 900px) {
             body { padding: 10px; }
             .container { padding: 15px 10px; border-radius: 8px; }
             
@@ -199,29 +233,29 @@
             table { table-layout: auto; }
             .col-exec-th, .col-exec-td,
             .col-pay-th,  .col-pay-td  { display: none; }
-            .mo-exec-inline { display: block; font-size: 10px; color: #7f8c8d; margin-top: 2px; }
-            .mo-pay-inline  { display: block; font-size: 10px; color: #7f8c8d; margin-top: 3px; }
+            /* [B-4] 모바일: 숨긴 컬럼의 col 요소 자체를 레이아웃에서 제거 */
+            .col-exec, .col-pay { display: none; }
+            /* [B-4] 모바일: serial 옆에 inline 으로 흐르도록 */
+            .mo-exec-inline { display: inline; font-size: 10px; color: #7f8c8d; margin-left: 4px; }
+            .mo-pay-inline  { display: inline; font-size: 10px; color: #7f8c8d; margin-left: 4px; }
             
-            /* [수정] 접두사: 제목과 동일하게 진하고(bold), 색상(#2c3e50) 맞춤, 크기 12px */
             .doc-prefix { 
-                display: block;        
-                font-size: 12px;       /* 11px -> 12px */
-                font-weight: bold;     /* normal -> bold */
-                color: #2c3e50;        /* #888 -> #2c3e50 */
+                display: block;        /* 모바일: 첫 줄에 prefix만 단독 표시 */
+                font-size: 12px;
+                font-weight: bold;
+                color: #2c3e50;
                 white-space: nowrap;   
-                margin-bottom: 0px;
                 line-height: 1.2;
                 letter-spacing: -0.5px;
             }
             
-            /* [수정] 일련번호: 제목과 동일하게 진하고(bold), 크기 12px */
+            /* [B-4] 모바일에서 prefix와 serial을 한 줄로 표시 */
             .col-doc strong { 
-                display: block;       
-                font-size: 12px;      /* 11px -> 12px */
+                display: inline;
+                font-size: 12px;
                 font-weight: bold;
-                color: #2c3e50;       /* 혹시 모를 상속 문제 방지용 명시 */
+                color: #2c3e50;
                 line-height: 1.2;
-                margin-top: 0px;
                 letter-spacing: -0.5px;
             }
             
@@ -255,7 +289,7 @@
                     <% if (user.role === 'Admin') { %>
                         <a href="/admin" class="nav-btn" style="color:#2980b9; border-color:#2980b9;">관리자</a>
                     <% } %>
-					<a href="/form?page=<%= currentPage %>&keyword=<%= encodeURIComponent(query.keyword || '') %>&author=<%= encodeURIComponent(query.author || '') %>" class="nav-btn pc-write">+ 신규작성</a>
+					<button type="button" onclick="chooseDocType()" class="nav-btn pc-write" style="cursor:pointer;">+ 신규작성</button>
                     <a href="/api/logout" class="nav-btn logout">로그아웃</a>
                 </div>
             </div>
@@ -310,6 +344,7 @@
                             else if(doc.status === '결재중') badgeClass = 'st-ing';
                             else if(doc.status === '최종결재') badgeClass = 'st-done';
                             else if(doc.status === '지급완료') badgeClass = 'st-paid';
+                            else if(doc.status === '결재완료') badgeClass = 'st-final-g'; /* [B-4] 일반 기안 종결 */
                             else if(doc.status === '반려') badgeClass = 'st-reject';
 
                             let fullDocNum = doc.docNum || '';
@@ -335,8 +370,13 @@
                         %>
 						<tr class="<%= isSpotlight ? 'row-spotlight' : '' %>" onclick="location.href='/form?docNum=<%= doc.docNum %>&page=<%= currentPage %>&keyword=<%= encodeURIComponent(query.keyword || '') %>&author=<%= encodeURIComponent(query.author || '') %>'">
                             <td style="color:#555;">
+                                <%
+                                    /* [B-4] 문서 유형 배지: G='기안' / E='지출' */
+                                    const _docType = doc.docType === 'G' ? 'G' : 'E';
+                                    const _docTypeLabel = _docType === 'G' ? '기안' : '지출';
+                                %>
                                 <span class="doc-prefix"><%= prefix %></span><strong><%= serial %></strong>
-                                <% if (execDate) { %><span class="mo-exec-inline"><%= execDate.short %></span><% } %>
+                                <% if (execDate) { %><span class="mo-exec-inline">(<%= execDate.short %>)</span><% } %>
                             </td>
                             <td class="col-exec-td date-cell <%= execDate ? '' : 'empty' %>">
                                 <% if (execDate) { %>
@@ -344,7 +384,10 @@
                                     <span class="mo-only"><%= execDate.short %></span>
                                 <% } else { %>-<% } %>
                             </td>
-                            <td style="text-align:left; font-weight:bold; color:#2c3e50; padding-left:10px;"><%= doc.subject || '(제목 없음)' %></td>
+                            <td class="col-subj-td" style="font-weight:bold; color:#2c3e50; padding-left:10px;">
+                                <span class="doc-type-badge doc-type-<%= _docType %>"><%= _docTypeLabel %></span>
+                                <span class="subj-text"><%= doc.subject || '(제목 없음)' %></span>
+                            </td>
                             <td style="line-height:1.3;"><strong><%= doc.appName || doc.applicantName || '-' %></strong><br><span style="font-size:11px; color:#7f8c8d;"><%= doc.appPos || doc.applicantPos || '' %></span></td>
                             <td>
                                 <span class="badge <%= badgeClass %>"><%= doc.status %></span>
@@ -378,7 +421,7 @@
     </div>
     <% } %>
 
-    <button class="write-btn" onclick="location.href='/form?page=<%= currentPage %>&keyword=<%= encodeURIComponent(query.keyword || '') %>&author=<%= encodeURIComponent(query.author || '') %>' ">+</button>
+    <button class="write-btn" onclick="chooseDocType()">+</button>
 
     <script>
         function filterByAuthor(val) {
@@ -387,6 +430,34 @@
             else url.searchParams.delete('author');
             url.searchParams.set('page', '1');
             window.location.href = url.toString();
+        }
+
+        // [B-4] 신규작성 시 문서 유형 선택 모달.
+        // 선택 결과에 따라 /form 또는 /form?type=G 로 이동.
+        function chooseDocType() {
+            const baseQs = `page=<%= currentPage %>&keyword=<%= encodeURIComponent(query.keyword || '') %>&author=<%= encodeURIComponent(query.author || '') %>`;
+            Swal.fire({
+                title: '신규 작성',
+                text: '작성할 문서 유형을 선택해 주세요.',
+                icon: 'question',
+                showCancelButton: true,
+                showDenyButton: true,
+                confirmButtonText: '지출결의서',
+                denyButtonText: '일반 기안',
+                cancelButtonText: '취소',
+                confirmButtonColor: '#2980b9',
+                denyButtonColor: '#16a085',
+                reverseButtons: false
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    // 지출결의서 (기존 동작)
+                    window.location.href = `/form?${baseQs}`;
+                } else if (result.isDenied) {
+                    // 일반 기안
+                    window.location.href = `/form?type=G&${baseQs}`;
+                }
+                // cancel 은 아무 동작 없음
+            });
         }
     </script>
 </body>

@@ -8,7 +8,32 @@ const db = require('../database');
 const { uploadDir, upload, saveFile, MAX_UPLOAD_MB } = require('../helpers/file');
 const { getTodayKST, getUser, getUserByPos, getNextDocNum, getSiteUrl, logAction } = require('../helpers/db');
 const { makeEmailHtml, sendEmail } = require('../helpers/email');
-const { expenditureValidator, validatePassword } = require('../middleware/validators');
+const { approvalValidator, validatePassword, normalizeApprovalBody } = require('../middleware/validators');
+
+// [B-2] docType 별 메타 정보. 라벨/접두어/파일명 라벨 분기에 사용.
+//  - E: 지출결의서 (기존 플로우)
+//  - G: 일반 기안 (총동문회장 결재 시 종결, 첨부파일은 선택)
+const DOC_META = {
+    'E': { label: '지출결의서', fileLabel: '증빙' },
+    'G': { label: '일반 기안',  fileLabel: '첨부' }
+};
+function getDocMeta(docType) {
+    return DOC_META[docType] || DOC_META['E'];
+}
+
+// [B-2] docType 별 결재 단계 매핑.
+// key: 결재자 position, value: { from: 처리 가능한 현재 상태, to: 승인 시 다음 상태, nextRole: 다음 결재자 직책 (없으면 종결) }
+const STAGE_MAP = {
+    'E': {
+        '사무총장':   { from: '제출완료', to: '결재중',   nextRole: '총동문회장' },
+        '총동문회장': { from: '결재중',   to: '최종결재', nextRole: '재무국장'   },
+        '재무국장':   { from: '최종결재', to: '지급완료', nextRole: null         }
+    },
+    'G': {
+        '사무총장':   { from: '제출완료', to: '결재중',   nextRole: '총동문회장' },
+        '총동문회장': { from: '결재중',   to: '결재완료', nextRole: null         }
+    }
+};
 
 router.get('/list', (req, res) => {
     const user = getUser(req);
@@ -19,7 +44,7 @@ router.get('/list', (req, res) => {
     const offset = (currentPage - 1) * limit;
     const sanitizedKeyword = keyword.replace(/%/g, '').trim();
 
-    db.all("SELECT DISTINCT appName FROM expenditures WHERE appName IS NOT NULL AND appName != '' ORDER BY appName ASC", [], (err, authors) => {
+    db.all("SELECT DISTINCT appName FROM approvals WHERE appName IS NOT NULL AND appName != '' ORDER BY appName ASC", [], (err, authors) => {
         let whereClause = "WHERE 1=1";
         let params = [];
         if (sanitizedKeyword) {
@@ -30,11 +55,13 @@ router.get('/list', (req, res) => {
 
         let authClause = "";
         if (user.role !== 'Admin') {
-            authClause = ` AND (applicantEmail = ? OR status IN ('최종결재', '지급완료') OR (status = '제출완료' AND ? = '사무총장') OR (status = '결재중' AND ? IN ('총동문회장', '사무총장')))`;
+            // [B-2] '결재완료'(일반 기안 종결 상태) 추가.
+            //       기존 정책: 본인 기안 OR 종결된 공개 문서 OR 결재 단계별 담당자만 조회 가능.
+            authClause = ` AND (applicantEmail = ? OR status IN ('최종결재', '지급완료', '결재완료') OR (status = '제출완료' AND ? = '사무총장') OR (status = '결재중' AND ? IN ('총동문회장', '사무총장')))`;
         }
         const countParams = user.role !== 'Admin' ? [...params, user.email, user.position, user.position] : params;
 
-        db.get(`SELECT COUNT(*) as total FROM expenditures ${whereClause} ${authClause}`, countParams, (err, countRow) => {
+        db.get(`SELECT COUNT(*) as total FROM approvals ${whereClause} ${authClause}`, countParams, (err, countRow) => {
             const totalDocs = countRow ? countRow.total : 0;
             const totalPages = Math.ceil(totalDocs / limit);
             const finalQuery = `
@@ -45,11 +72,12 @@ router.get('/list', (req, res) => {
                     (? = '총동문회장' AND status = '결재중') OR
                     (? = '재무국장' AND status = '최종결재')
                 ) as spotlight
-                FROM expenditures ${whereClause} ${authClause}
+                FROM approvals ${whereClause} ${authClause}
                 ORDER BY spotlight DESC,
-                    CASE status
-                        WHEN '결재중' THEN 1 WHEN '제출완료' THEN 2 WHEN '작성중' THEN 3
-                        WHEN '반려' THEN 3 WHEN '최종결재' THEN 4 WHEN '지급완료' THEN 5 ELSE 6
+                    CASE
+                        WHEN status IN ('작성중', '반려', '제출완료', '결재중')
+                            THEN 0   -- 진행 중인 문서 묶음
+                        ELSE 1       -- 종결 문서 묶음 ('결재완료', '지급완료')
                     END ASC,
                     docNum DESC
                 LIMIT ? OFFSET ?`;
@@ -61,7 +89,7 @@ router.get('/list', (req, res) => {
             ];
             db.all(finalQuery, queryParams, (err, rows) => {
                 if (err) console.error("Query Error:", err);
-                res.render('ExpenditureList', { user, docs: rows || [], currentPage, totalPages, authors: authors || [], query: { keyword: sanitizedKeyword, author } });
+                res.render('ApprovalList', { user, docs: rows || [], currentPage, totalPages, authors: authors || [], query: { keyword: sanitizedKeyword, author } });
             });
         });
     });
@@ -106,10 +134,12 @@ router.get('/form', async (req, res) => {
     };
 
     if (!docNum) {
-        return res.render('ExpenditureForm', { user, mode: 'WRITE', docNum: '', initDataJSON: serialize({}, { isJSON: true }), ...commonData, listPage, listKeyword, listAuthor });
+        // [B-5a] 신규 작성: 쿼리 ?type=G 면 일반 기안, 그 외는 모두 지출결의서('E')
+        const docType = req.query.type === 'G' ? 'G' : 'E';
+        return res.render('ApprovalForm', { user, mode: 'WRITE', docNum: '', docType, initDataJSON: serialize({}, { isJSON: true }), ...commonData, listPage, listKeyword, listAuthor });
     }
 
-    db.get("SELECT * FROM expenditures WHERE docNum = ?", [docNum], (err, doc) => {
+    db.get("SELECT * FROM approvals WHERE docNum = ?", [docNum], (err, doc) => {
         if (err || !doc) return res.send(renderAlertHTML('존재하지 않거나 삭제된 문서입니다.'));
         if (doc.status === '작성중' && doc.applicantEmail !== user.email) return res.send(renderAlertHTML('기안자에 의해 회수된 문서입니다. 목록을 갱신합니다.'));
         if (doc.locked_at && doc.locked_by_email && doc.locked_by_email !== user.email) {
@@ -127,7 +157,9 @@ router.get('/form', async (req, res) => {
         doc.applicantPhone = doc.applicantPhone || doc.appPhone;
         let mode = 'VIEW';
         if (doc.applicantEmail === user.email && ['작성중', '반려'].includes(doc.status)) mode = 'WRITE';
-        res.render('ExpenditureForm', { user, mode, docNum, initDataJSON: serialize(doc, { isJSON: true }), ...commonData, listPage, listKeyword, listAuthor });
+        // [B-5a] 기존 문서: DB의 docType을 신뢰 (클라이언트 쿼리 무시)
+        const docType = doc.docType === 'G' ? 'G' : 'E';
+        res.render('ApprovalForm', { user, mode, docNum, docType, initDataJSON: serialize(doc, { isJSON: true }), ...commonData, listPage, listKeyword, listAuthor });
     });
 });
 
@@ -138,7 +170,7 @@ router.post('/api/submit', (req, res, next) => {
         if (err) return res.json({ status: 'Error', msg: err.code === 'LIMIT_FILE_SIZE' ? `파일 크기 초과 (${MAX_UPLOAD_MB}MB)` : err.message });
         next();
     });
-}, expenditureValidator, async (req, res) => {
+}, normalizeApprovalBody, approvalValidator, async (req, res) => {
     const user = getUser(req);
     const f = req.body;
     let finalDocNum = f.docNum || `TEMP-${Date.now()}`;
@@ -148,11 +180,18 @@ router.post('/api/submit', (req, res, next) => {
     let initialStatus = ALLOWED_CLIENT_STATUS.includes(f.status) ? f.status : '작성중';
     let finalReqDate = f.reqDate || (initialStatus !== '작성중' ? getTodayKST() : "");
 
+    // [B-2] docType 결정.
+    //  - 신규 작성: 클라이언트가 보낸 docType ('E' or 'G'). 그 외 값은 'E'로 강제.
+    //  - 재제출(기존 docNum 존재): DB의 docType을 그대로 사용 (변조 방지). 아래에서 SELECT 후 재할당.
+    let docType = (f.docType === 'G') ? 'G' : 'E';
+    const meta = getDocMeta(docType);
+
+    // 자결재 분기 (docType에 따라 종결 상태가 다름)
     if (initialStatus === '제출완료') {
         if (user.position === '사무총장') {
             initialStatus = '결재중';
         } else if (user.position === '총동문회장') {
-            initialStatus = '최종결재';
+            initialStatus = (docType === 'G') ? '결재완료' : '최종결재';
             try { finalDocNum = await getNextDocNum(new Date().getFullYear()); } catch(e) { console.error("DocNum Error:", e); }
         }
     }
@@ -174,7 +213,8 @@ router.post('/api/submit', (req, res, next) => {
                     throw new Error(`허용되지 않은 파일 형식: ${file.originalname}`);
                 }
                 const dirName = path.dirname(file.path);
-                const finalFilename = `${finalDocNum}_증빙${filePaths.length + 1}_${timestamp}_${i}.${detectedType.ext}`;
+                // [B-2] docType에 따라 파일명 중간 라벨 분기 ('증빙N' or '첨부N')
+                const finalFilename = `${finalDocNum}_${meta.fileLabel}${filePaths.length + 1}_${timestamp}_${i}.${detectedType.ext}`;
                 const finalPath = path.join(dirName, finalFilename);
                 await fs.promises.rename(file.path, finalPath);
                 renamedFilePaths.push(finalPath);
@@ -185,20 +225,22 @@ router.post('/api/submit', (req, res, next) => {
         let itemsStr = f.items;
         try { if (typeof f.items !== 'string') itemsStr = JSON.stringify(f.items); } catch(e) { itemsStr = "[]"; }
 
-        const params = [finalDocNum, user.email, f.subject, f.bodyContent, f.totalAmount, finalReqDate, itemsStr, initialStatus, user.position, user.name, user.phone, user.signature_path, filePathsStr];
+        // [B-2] params에 docType 추가 (INSERT 용)
+        const params = [finalDocNum, user.email, f.subject, f.bodyContent, f.totalAmount, finalReqDate, itemsStr, initialStatus, user.position, user.name, user.phone, user.signature_path, filePathsStr, docType];
 
         const afterSave = async () => {
-            db.run("UPDATE expenditures SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=?", [finalDocNum]);
+            db.run("UPDATE approvals SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=?", [finalDocNum]);
             // 본인 기안 시 자동 승인되는 결재 단계를 DB 에도 기록 (감사 추적용)
             const today = getTodayKST();
             if (user.position === '사무총장' && initialStatus === '결재중') {
                 db.run(
-                    "UPDATE expenditures SET secName=?, secSig=?, secDate=? WHERE docNum=?",
+                    "UPDATE approvals SET secName=?, secSig=?, secDate=? WHERE docNum=?",
                     [user.name, user.signature_path, today, finalDocNum]
                 );
-            } else if (user.position === '총동문회장' && initialStatus === '최종결재') {
+            } else if (user.position === '총동문회장' && (initialStatus === '최종결재' || initialStatus === '결재완료')) {
+                // [B-2] 일반 기안의 자결재 종결('결재완료')도 동일하게 결재 흔적 기록
                 db.run(
-                    "UPDATE expenditures SET secName=?, secSig=?, secDate=?, presName=?, presSig=?, executionDate=? WHERE docNum=?",
+                    "UPDATE approvals SET secName=?, secSig=?, secDate=?, presName=?, presSig=?, executionDate=? WHERE docNum=?",
                     [user.name, user.signature_path, today, user.name, user.signature_path, today, finalDocNum]
                 );
             }
@@ -206,30 +248,41 @@ router.post('/api/submit', (req, res, next) => {
             if (initialStatus === '작성중') msg = "임시저장 되었습니다.";
             else if (initialStatus === '결재중') msg = "제출 및 사무총장 자동 승인 완료 (총동문회장 결재 단계).";
             else if (initialStatus === '최종결재') msg = "제출 및 최종 승인 완료 (재무국장 지급 단계).";
+            else if (initialStatus === '결재완료') msg = "제출 및 결재 완료 (총동문회장 자동 결재).";
             res.json({ msg });
             try {
                 const baseUrl = await getSiteUrl();
                 const appInfoStr = `${user.position} ${user.name}`;
-                let targetPos = "";
-                if (initialStatus === '제출완료') targetPos = '사무총장';
-                else if (initialStatus === '결재중') targetPos = '총동문회장';
-                else if (initialStatus === '최종결재') targetPos = '재무국장';
-                if (targetPos) {
-                    const recipient = await getUserByPos(targetPos);
-                    if (recipient && recipient.email) {
-                        const mailSubject = (initialStatus === '최종결재') ? `[지급요청] ${f.subject}` : `[결재요청] ${f.subject}`;
-                        await sendEmail(recipient.email, mailSubject, makeEmailHtml(finalDocNum, f.subject, appInfoStr, "결재(지급) 요청", baseUrl));
-                    }
+                // [B-2] 메일 발송 분기. 일반 기안의 '결재완료' 자결재는 외부 통지가 불필요하므로 발송 안 함.
+                let recipientEmail = null, mailSubject = '';
+                if (initialStatus === '제출완료') {
+                    const r = await getUserByPos('사무총장');
+                    if (r) { recipientEmail = r.email; mailSubject = `[결재요청] ${meta.label} - ${f.subject}`; }
+                } else if (initialStatus === '결재중') {
+                    const r = await getUserByPos('총동문회장');
+                    if (r) { recipientEmail = r.email; mailSubject = `[결재요청] ${meta.label} - ${f.subject}`; }
+                } else if (initialStatus === '최종결재') {
+                    const r = await getUserByPos('재무국장');
+                    if (r) { recipientEmail = r.email; mailSubject = `[지급요청] ${meta.label} - ${f.subject}`; }
+                }
+                if (recipientEmail) {
+                    await sendEmail(recipientEmail, mailSubject, makeEmailHtml(finalDocNum, f.subject, appInfoStr, "결재(지급) 요청", baseUrl));
                 }
             } catch (e) { console.error("[Mail Error]", e); }
         };
 
-        db.get("SELECT docNum FROM expenditures WHERE docNum = ?", [finalDocNum], (err, row) => {
+        // [B-2] 재제출 시 docType은 DB값을 그대로 유지(클라이언트가 변경 못 함).
+        //       UPDATE 쿼리에는 docType을 포함하지 않으므로 자동 보존된다.
+        db.get("SELECT docNum, docType FROM approvals WHERE docNum = ?", [finalDocNum], (err, row) => {
             if (row) {
+                // 기존 문서 재제출: DB의 docType을 신뢰
+                docType = row.docType || 'E';
+                // meta/파일명은 이미 위에서 처리됐지만, 메일 제목 분기를 위해 갱신
+                Object.assign(meta, getDocMeta(docType));
                 db.run(
                     // [수정] 회수·반려 후 재제출 시 기안자 정보 및 이전 결재자 흔적 초기화
                     //        이전 결재자 서명(secSig/presSig 등)이 DB에 잔존해 감사 트레일이 오염되는 문제를 해결
-                    "UPDATE expenditures SET \
+                    "UPDATE approvals SET \
                         subject=?, bodyContent=?, totalAmount=?, reqDate=?, items=?, status=?, file_paths=?, \
                         appPos=?, appName=?, appPhone=?, appSig=?, \
                         secName=NULL, secSig=NULL, secDate=NULL, \
@@ -242,7 +295,8 @@ router.post('/api/submit', (req, res, next) => {
                     (err) => err ? res.json({ msg: err.message }) : afterSave()
                 );
             } else {
-                db.run(`INSERT INTO expenditures (docNum, applicantEmail, subject, bodyContent, totalAmount, reqDate, items, status, appPos, appName, appPhone, appSig, file_paths, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+                // 신규 작성: docType 포함하여 INSERT
+                db.run(`INSERT INTO approvals (docNum, applicantEmail, subject, bodyContent, totalAmount, reqDate, items, status, appPos, appName, appPhone, appSig, file_paths, docType, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
                     params, (err) => err ? res.json({ msg: "DB 오류: " + err.message }) : afterSave());
             }
         });
@@ -258,23 +312,31 @@ router.post('/api/approve', (req, res) => {
     const { docNum, action } = req.body;
     const todayStr = getTodayKST();
 
-    db.get("SELECT * FROM expenditures WHERE docNum = ?", [docNum], async (err, doc) => {
+    db.get("SELECT * FROM approvals WHERE docNum = ?", [docNum], async (err, doc) => {
         if (!doc) return res.json({ msg: "문서를 찾을 수 없습니다." });
 
-        const stageMap = {
-            '사무총장':  '제출완료',
-            '총동문회장': '결재중',
-            '재무국장':  '최종결재',
-        };
+        // [B-2] docType 별 stage map 사용. doc.docType은 'E' 또는 'G'.
+        const docType = doc.docType || 'E';
+        const meta = getDocMeta(docType);
+        const stagesForDoc = STAGE_MAP[docType] || {};
+        const stageInfo = stagesForDoc[user.position]; // 현재 사용자가 이 docType의 결재 라인에 있는지
+
         const isOwnDoc = doc.applicantEmail === user.email;
         if (action !== 'REJECT' && user.role !== 'Admin' && !isOwnDoc) {
-            const requiredStatus = stageMap[user.position];
-            if (requiredStatus && doc.status !== requiredStatus) {
+            // 결재 라인에 없거나, 이 단계에서 처리할 수 없는 상태면 거부
+            if (!stageInfo) {
+                return res.json({ status: 'Error', msg: '승인 권한이 없습니다.' });
+            }
+            if (doc.status !== stageInfo.from) {
                 return res.json({ status: 'Error', msg: '현재 결재 단계에서 처리할 수 없는 문서입니다.' });
             }
         }
         if (action !== 'REJECT' && isOwnDoc && user.role !== 'Admin') {
-            return res.json({ status: 'Error', msg: '본인이 기안한 문서는 직접 결재할 수 없습니다.' });
+            // [예외] '지급완료' 단계(재무국장)는 본인 기안 문서도 직접 결재 허용
+            const isPaymentStage = stageInfo && stageInfo.to === '지급완료';
+            if (!isPaymentStage) {
+                return res.json({ status: 'Error', msg: '본인이 기안한 문서는 직접 결재할 수 없습니다.' });
+            }
         }
 
         if (action === 'REJECT') {
@@ -284,28 +346,36 @@ router.post('/api/approve', (req, res) => {
             if (!canReject) {
                 return res.json({ status: 'Error', msg: '반려 권한이 없습니다.' });
             }
-            logAction(req, 'DOC_REJECT', `문서 반려 처리: ${docNum}`);
-            db.run("UPDATE expenditures SET status='반려', locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=?", [docNum], async () => {
+            logAction(req, 'DOC_REJECT', `문서 반려 처리(${meta.label}): ${docNum}`);
+            db.run("UPDATE approvals SET status='반려', locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=?", [docNum], async () => {
                 res.json({ msg: '반려되었습니다.' });
                 if (doc.applicantEmail) {
                     try {
                         const baseUrl = await getSiteUrl();
                         const appInfo = `${doc.appPos || doc.applicantPos} ${doc.appName || doc.applicantName}`;
-                        await sendEmail(doc.applicantEmail, `[반려] ${doc.subject}`, makeEmailHtml(docNum, doc.subject, appInfo, '반려 알림', baseUrl));
-                    } catch(e) {}
+                        await sendEmail(doc.applicantEmail, `[반려] ${meta.label} - ${doc.subject}`, makeEmailHtml(docNum, doc.subject, appInfo, '반려 알림', baseUrl));
+                    } catch(e) { console.error('[Mail dispatch error]', e.message); }
                 }
             });
             return;
         }
 
+        // 권한이 없는 경우(stageInfo 없음 + Admin 아님) — 위에서 이미 차단됐지만 방어적으로 한 번 더
+        if (!stageInfo && user.role !== 'Admin') {
+            return res.json({ msg: "승인 권한이 없습니다." });
+        }
+
         let nextStatus = "", updateQuery = "", params = [], newDocNum = docNum, nextRole = "";
 
         if (user.position === '사무총장') {
-            nextStatus = '결재중'; nextRole = '총동문회장';
-            updateQuery = "UPDATE expenditures SET status=?, secName=?, secSig=?, secDate=? WHERE docNum=?";
+            nextStatus = stageInfo.to;       // 'E', 'G' 모두 '결재중'
+            nextRole   = stageInfo.nextRole; // '총동문회장'
+            updateQuery = "UPDATE approvals SET status=?, secName=?, secSig=?, secDate=? WHERE docNum=?";
             params = [nextStatus, user.name, user.signature_path, todayStr, docNum];
         } else if (user.position === '총동문회장') {
-            nextStatus = '최종결재'; nextRole = '재무국장';
+            // E: '최종결재'(재무국장 단계로) | G: '결재완료'(종결)
+            nextStatus = stageInfo.to;
+            nextRole   = stageInfo.nextRole; // E='재무국장' | G=null
             try { newDocNum = await getNextDocNum(new Date().getFullYear()); } catch(e) {
                 return res.json({ status: 'Error', msg: '문서 번호 생성 실패: ' + e.message });
             }
@@ -322,7 +392,8 @@ router.post('/api/approve', (req, res) => {
                         const oldPath = path.join(uploadDir, oldName);
                         const fileDir = path.dirname(oldName);
                         const ext = path.extname(oldName);
-                        const newFileNameOnly = `${newDocNum}_증빙${index + 1}_${timestamp}${ext}`;
+                        // [B-2] docType별 파일명 라벨 ('증빙N' or '첨부N')
+                        const newFileNameOnly = `${newDocNum}_${meta.fileLabel}${index + 1}_${timestamp}${ext}`;
                         const newPath = path.join(uploadDir, fileDir, newFileNameOnly);
                         const newDbPath = path.join(fileDir, newFileNameOnly).replace(/\\/g, '/');
                         try {
@@ -338,27 +409,37 @@ router.post('/api/approve', (req, res) => {
                     return res.json({ msg: "처리 중 오류가 발생하여 취소되었습니다." });
                 }
             }
-            db.run("UPDATE expenditures SET docNum=?, status=?, presName=?, presSig=?, executionDate=?, file_paths=? WHERE docNum=?",
+            db.run("UPDATE approvals SET docNum=?, status=?, presName=?, presSig=?, executionDate=?, file_paths=? WHERE docNum=?",
                 [newDocNum, nextStatus, user.name, user.signature_path, todayStr, newFilePaths, docNum],
                 async function(err) {
                     if (err) {
                         for (const h of renameHistory) await fs.promises.rename(h.newPath, h.oldPath).catch(() => {});
                         return res.json({ msg: "DB 저장 오류로 승인이 취소되었습니다.<br>관리자에게 문의하시기 바랍니다." });
                     }
-                    logAction(req, 'DOC_APPROVE', `문서 승인(${nextStatus}): ${newDocNum}`);
-                    db.run("UPDATE expenditures SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=?", [newDocNum]);
+                    logAction(req, 'DOC_APPROVE', `문서 승인(${meta.label}, ${nextStatus}): ${newDocNum}`);
+                    db.run("UPDATE approvals SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=?", [newDocNum]);
                     res.json({ msg: "승인 완료" });
                     try {
                         const baseUrl = await getSiteUrl();
                         const appInfo = `${doc.appPos || doc.applicantPos} ${doc.appName || doc.applicantName}`;
-                        const nextPerson = await getUserByPos(nextRole);
-                        if (nextPerson && nextPerson.email) await sendEmail(nextPerson.email, `[결재요청] ${doc.subject}`, makeEmailHtml(newDocNum, doc.subject, appInfo, "결재 요청", baseUrl));
-                    } catch(e) {}
+                        // [B-2] 일반 기안 종결: 기안자에게 결재완료 알림.
+                        //       지출결의서: 다음 결재자(재무국장)에게 결재요청.
+                        if (docType === 'G') {
+                            if (doc.applicantEmail) {
+                                await sendEmail(doc.applicantEmail, `[결재완료] ${meta.label} - ${doc.subject}`, makeEmailHtml(newDocNum, doc.subject, appInfo, "결재 완료", baseUrl));
+                            }
+                        } else {
+                            const nextPerson = await getUserByPos(nextRole);
+                            if (nextPerson && nextPerson.email) await sendEmail(nextPerson.email, `[결재요청] ${meta.label} - ${doc.subject}`, makeEmailHtml(newDocNum, doc.subject, appInfo, "결재 요청", baseUrl));
+                        }
+                    } catch(e) { console.error('[Mail dispatch error]', e.message); }
                 });
             return;
-        } else if (user.position === '재무국장') {
-            nextStatus = '지급완료';
-            updateQuery = "UPDATE expenditures SET status=?, payDate=? WHERE docNum=?";
+        } else if (user.position === '재무국장' && docType === 'E') {
+            // 재무국장 단계는 지출결의서 전용
+            nextStatus = stageInfo.to;       // '지급완료'
+            nextRole   = stageInfo.nextRole; // null
+            updateQuery = "UPDATE approvals SET status=?, payDate=? WHERE docNum=?";
             params = [nextStatus, todayStr, docNum];
         }
 
@@ -366,19 +447,19 @@ router.post('/api/approve', (req, res) => {
 
         db.run(updateQuery, params, async (err) => {
             if (err) return res.json({ msg: err.message });
-            logAction(req, 'DOC_APPROVE', `문서 승인(${nextStatus}): ${newDocNum}`);
-            db.run("UPDATE expenditures SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=?", [newDocNum]);
+            logAction(req, 'DOC_APPROVE', `문서 승인(${meta.label}, ${nextStatus}): ${newDocNum}`);
+            db.run("UPDATE approvals SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=?", [newDocNum]);
             res.json({ msg: "승인 완료" });
             try {
                 const baseUrl = await getSiteUrl();
                 const appInfo = `${doc.appPos || doc.applicantPos} ${doc.appName || doc.applicantName}`;
                 if (nextStatus === '지급완료') {
-                    if (doc.applicantEmail) await sendEmail(doc.applicantEmail, `[지급완료] ${doc.subject}`, makeEmailHtml(newDocNum, doc.subject, appInfo, "지급 완료", baseUrl));
-                } else {
+                    if (doc.applicantEmail) await sendEmail(doc.applicantEmail, `[지급완료] ${meta.label} - ${doc.subject}`, makeEmailHtml(newDocNum, doc.subject, appInfo, "지급 완료", baseUrl));
+                } else if (nextRole) {
                     const nextPerson = await getUserByPos(nextRole);
-                    if (nextPerson && nextPerson.email) await sendEmail(nextPerson.email, `[결재요청] ${doc.subject}`, makeEmailHtml(newDocNum, doc.subject, appInfo, "결재 요청", baseUrl));
+                    if (nextPerson && nextPerson.email) await sendEmail(nextPerson.email, `[결재요청] ${meta.label} - ${doc.subject}`, makeEmailHtml(newDocNum, doc.subject, appInfo, "결재 요청", baseUrl));
                 }
-            } catch(e) {}
+            } catch(e) { console.error('[Mail dispatch error]', e.message); }
         });
     });
 });
@@ -426,10 +507,10 @@ router.post('/api/profile/update', async (req, res) => {
 
 router.post('/api/lock/acquire', (req, res) => {
     const timeout = new Date(Date.now() - 3 * 60 * 1000).toISOString();
-    db.run("UPDATE expenditures SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE locked_at < ?", [timeout]);
+    db.run("UPDATE approvals SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE locked_at < ?", [timeout]);
     const user = getUser(req);
     const { docNum } = req.body;
-    db.get("SELECT status, applicantEmail, locked_by_name, locked_by_email, locked_at FROM expenditures WHERE docNum = ?", [docNum], (err, row) => {
+    db.get("SELECT status, applicantEmail, locked_by_name, locked_by_email, locked_at FROM approvals WHERE docNum = ?", [docNum], (err, row) => {
         if (err || !row) return res.json({ status: 'Error', msg: '문서가 없습니다.' });
         if (['최종결재', '지급완료'].includes(row.status)) return res.json({ status: 'Success', message: 'Read-only mode (No lock required)' });
         if (row.status === '작성중' && user.email !== row.applicantEmail) return res.json({ status: 'Recalled', msg: '기안자에 의해 회수된 문서입니다.' });
@@ -440,7 +521,7 @@ router.post('/api/lock/acquire', (req, res) => {
                 return res.json({ status: 'Locked', msg: `현재 [${row.locked_by_name}]님이 ${actionMsg}` });
             }
         }
-        db.run("UPDATE expenditures SET locked_by_name=?, locked_by_email=?, locked_at=? WHERE docNum=?",
+        db.run("UPDATE approvals SET locked_by_name=?, locked_by_email=?, locked_at=? WHERE docNum=?",
             [user.name, user.email, new Date().toISOString(), docNum],
             (err) => err ? res.json({ status: 'Error', msg: err.message }) : res.json({ status: 'Success' }));
     });
@@ -449,7 +530,7 @@ router.post('/api/lock/acquire', (req, res) => {
 router.post('/api/lock/release', (req, res) => {
     const user = getUser(req);
     const { docNum } = req.body;
-    db.run("UPDATE expenditures SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=? AND locked_by_email=?",
+    db.run("UPDATE approvals SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=? AND locked_by_email=?",
         [docNum, user.email],
         function(err) { res.json(err ? { status: 'Error' } : { status: 'Success' }); }
     );
@@ -458,7 +539,7 @@ router.post('/api/lock/release', (req, res) => {
 router.post('/api/recall', (req, res) => {
     const user = getUser(req);
     const { docNum } = req.body;
-    db.run(`UPDATE expenditures SET status='작성중', secName=NULL, secSig=NULL, secDate=NULL, presName=NULL, presSig=NULL, executionDate=NULL, locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=? AND applicantEmail=? AND status IN ('제출완료', '결재중')`,
+    db.run(`UPDATE approvals SET status='작성중', secName=NULL, secSig=NULL, secDate=NULL, presName=NULL, presSig=NULL, executionDate=NULL, locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=? AND applicantEmail=? AND status IN ('제출완료', '결재중')`,
         [docNum, user.email], function(err) {
             if (err) return res.json({ status: 'Error', msg: err.message });
             if (this.changes === 0) return res.json({ status: 'Error', msg: '회수할 수 없는 상태입니다.' });
@@ -484,7 +565,7 @@ router.get('/api/download/*', (req, res) => {
     }
     // 콤마 경계 매칭으로 부분일치 오매칭 방지
     db.get(
-        "SELECT applicantEmail, status FROM expenditures WHERE ',' || file_paths || ',' LIKE ?",
+        "SELECT applicantEmail, status FROM approvals WHERE ',' || file_paths || ',' LIKE ?",
         [`%,${relativePath},%`],
         async (err, row) => {
             if (err) return res.status(500).send("시스템 오류");
@@ -524,7 +605,7 @@ router.post('/api/file/delete', async (req, res) => {
     // [보안] 파일이 속한 문서의 소유자인지 확인
     // 콤마 경계 매칭으로 부분일치 오매칭 방지
     db.get(
-        "SELECT docNum, file_paths, applicantEmail FROM expenditures WHERE ',' || file_paths || ',' LIKE ?",
+        "SELECT docNum, file_paths, applicantEmail FROM approvals WHERE ',' || file_paths || ',' LIKE ?",
         [`%,${fileId},%`],
         async (err, row) => {
             if (err) return res.json({ status: 'Error', msg: 'DB 조회 실패' });
@@ -548,7 +629,7 @@ router.post('/api/file/delete', async (req, res) => {
 
             // [수정] DB 먼저 갱신 → 성공 시 물리 파일 삭제 (DB 실패 시 파일 보존)
             const paths = row.file_paths.split(',').map(s => s.trim()).filter(p => p !== fileId && p !== '');
-            db.run("UPDATE expenditures SET file_paths = ? WHERE docNum = ?",
+            db.run("UPDATE approvals SET file_paths = ? WHERE docNum = ?",
                 [paths.join(','), row.docNum], async (updateErr) => {
                     if (updateErr) return res.json({ status: 'Error', msg: 'DB 업데이트 실패' });
                     try { await fs.promises.unlink(safePath); } catch (e) {
