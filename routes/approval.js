@@ -149,6 +149,13 @@ router.get('/form', async (req, res) => {
                 return res.send(renderAlertHTML(`현재 [${doc.locked_by_name}]님이 ${actionMsg}`));
             }
         }
+
+        // [감사로그] 문서 열람 기록. 접근 차단을 모두 통과해 실제 화면에 진입하는 시점에 기록.
+        //           본인 작성중 회수(상기 분기) / 락 충돌 / 존재하지 않음 케이스는 열람으로 간주하지 않음.
+        //           단순 신규 작성 진입(docNum 없음)은 위 db.get 자체가 실행되지 않으므로 자동 제외.
+        const subjectForLog = (doc.subject && doc.subject.trim()) ? doc.subject : '(제목 없음)';
+        logAction(req, 'DOC_VIEW', `문서 열람: ${docNum} (제목: ${subjectForLog}, 상태: ${doc.status})`);
+
         try { doc.items = JSON.parse(doc.items || "[]"); } catch(e) { doc.items = []; }
         doc.attachmentIds = doc.file_paths;
         doc.signatures = { applicant: doc.appSig, secretary: doc.secSig, president: doc.presSig };
@@ -249,6 +256,17 @@ router.post('/api/submit', (req, res, next) => {
             else if (initialStatus === '결재중') msg = "제출 및 사무총장 자동 승인 완료 (총동문회장 결재 단계).";
             else if (initialStatus === '최종결재') msg = "제출 및 최종 승인 완료 (재무국장 지급 단계).";
             else if (initialStatus === '결재완료') msg = "제출 및 결재 완료 (총동문회장 자동 결재).";
+
+            // [감사로그] 문서 제출 기록. 임시저장('작성중')은 제외.
+            //           자결재 케이스(사무총장/총동문회장 자가기안)도 '제출' 행위 자체는 동일하게 기록한다.
+            //           최종 도달 상태(initialStatus)와 docType, 제목을 함께 남겨 추적성 확보.
+            if (initialStatus !== '작성중') {
+                const meta = getDocMeta(docType);
+                const subjectForLog = (f.subject && f.subject.trim()) ? f.subject : '(제목 없음)';
+                logAction(req, 'DOC_SUBMIT',
+                    `문서 제출(${meta.label}): ${finalDocNum} (제목: ${subjectForLog}, 도달상태: ${initialStatus})`);
+            }
+
             res.json({ msg });
             try {
                 const baseUrl = await getSiteUrl();
@@ -582,9 +600,13 @@ router.get('/api/download/*', (req, res) => {
             }
             try {
                 await fs.promises.access(safePath);
-                // 증빙파일 다운로드 감사 로그
-                const docStatus = row ? row.status : 'UNKNOWN';
-                logAction(req, 'FILE_DOWNLOAD', `증빙파일 다운로드: ${relativePath} (상태: ${docStatus})`);
+                // [수정] 명시적 다운로드(?download=1) 인 경우에만 감사 로그 기록.
+                //        인라인 렌더링(<img>, PDF.js getDocument 등)에 의한 자동 호출은
+                //        '열람' 이지 '다운로드'가 아니므로 로그에서 제외한다.
+                if (req.query.download === '1') {
+                    const docStatus = row ? row.status : 'UNKNOWN';
+                    logAction(req, 'FILE_DOWNLOAD', `증빙파일 다운로드: ${relativePath} (상태: ${docStatus})`);
+                }
                 res.download(safePath);
             } catch { res.status(404).send('파일 없음'); }
         }
