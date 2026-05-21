@@ -113,7 +113,13 @@ function checkAndMigrateDB() {
         { name: 'locked_at', type: 'TEXT' },
         // [B-1] docType 컬럼. 'E'(지출결의서, 기본) / 'G'(일반 기안).
         //       기존 행은 'E' 로 백필된다.
-        { name: 'docType', type: "TEXT NOT NULL DEFAULT 'E'" }
+        { name: 'docType', type: "TEXT NOT NULL DEFAULT 'E'" },
+        // [STAGE_SKIP] 사무총장 단계 건너뛰기 기록용 컬럼.
+        //  - secSkippedBy 가 NULL 이 아니면 화면에서 사선(/) 표시
+        //  - 회수/반려/재제출 시 함께 초기화 (감사 트레일 무결성)
+        { name: 'secSkippedBy',     type: 'TEXT' },
+        { name: 'secSkippedAt',     type: 'DATETIME' },
+        { name: 'secSkippedReason', type: 'TEXT' }
     ];
     db.all("PRAGMA table_info(approvals)", [], (err, columns) => {
         if (err) return console.error(">> [DB Error] 조회 실패:", err);

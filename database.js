@@ -88,6 +88,21 @@ db.serialize(() => {
       }
     });
   });
+
+  // [STAGE_SKIP] 사무총장 단계 건너뛰기 기록용 컬럼
+  // secSkippedBy 가 NULL 이 아니면 화면에서 사선(/)으로 표시한다.
+  const skipColumns = [
+    { name: 'secSkippedBy',     type: 'TEXT' },
+    { name: 'secSkippedAt',     type: 'DATETIME' },
+    { name: 'secSkippedReason', type: 'TEXT' }
+  ];
+  skipColumns.forEach(col => {
+    db.run(`ALTER TABLE approvals ADD COLUMN ${col.name} ${col.type}`, (err) => {
+      if (err && !/duplicate column name/i.test(err.message)) {
+        console.error(`[DB Migrate] approvals.${col.name} 추가 실패:`, err.message);
+      }
+    });
+  });
   
   // [추가] 문서 번호 채번을 위한 시퀀스 테이블
   db.run(`CREATE TABLE IF NOT EXISTS doc_sequences (
