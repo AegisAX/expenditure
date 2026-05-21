@@ -175,6 +175,16 @@ tr:hover { background-color: #fafafa; }
 .modal-footer { margin-top: 25px; text-align: right; display: flex; justify-content: flex-end; gap: 10px; }
 .modal-header { font-size: 18px; font-weight: bold; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
 .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; z-index: 1000; }
+/* 문서 상세 */
+.doc-detail-list { margin: 0; padding: 0; display: grid; grid-template-columns: 100px 1fr; row-gap: 12px; column-gap: 16px; font-size: 13px; line-height: 1.4; }
+.doc-detail-list dt { color: #7f8c8d; margin: 0; align-self: center; }
+.doc-detail-list dd { margin: 0; color: #2c3e50; word-break: break-word; align-self: center; }
+.doc-detail-list dd .badge { vertical-align: middle; }
+.doc-detail-list dd .doc-type-badge { margin-right: 6px; }
+#docm-skip-info { color: #BA7517; font-size: 12px; line-height: 1.5; background: #fef5e7; padding: 10px 12px; border-radius: 6px; border-left: 3px solid #BA7517; }
+.docm-guide { margin-top: 18px; padding: 12px 14px; background: #f8f9fa; border-radius: 6px; font-size: 12px; color: #7f8c8d; line-height: 1.5; }
+#docModal .modal-content { { overflow-x: hidden; }
+#docModal .modal-body { { overflow-x: hidden; overflow-y: auto; }
 
 /* === [2. 모바일 반응형 스타일] === */
 /* === [1단계] 900px 이하 — 큰 모바일/태블릿 (기존 동작) === */
@@ -433,6 +443,38 @@ tr:hover { background-color: #fafafa; }
     </div>
 </div>
 
+<div id="docModal" class="modal-overlay">
+    <div class="modal-content">
+        <div class="modal-header">
+            <span>문서 상세</span>
+            <span class="close-btn" onclick="closeDocModal()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <dl class="doc-detail-list">
+                <dt>문서번호</dt><dd id="docm-num">-</dd>
+                <dt>유형</dt><dd id="docm-type">-</dd>
+                <dt>제목</dt><dd id="docm-subject">-</dd>
+                <dt>상태</dt><dd id="docm-status">-</dd>
+                <dt>기안자</dt><dd id="docm-applicant">-</dd>
+                <dt>기안일</dt><dd id="docm-reqdate">-</dd>
+                <dt id="docm-amount-dt">금액</dt><dd id="docm-amount">-</dd>
+                <dt id="docm-skip-dt" style="display:none;">건너뛰기 이력</dt>
+                <dd id="docm-skip-info" style="display:none;">-</dd>
+            </dl>
+            <div id="docm-skip-guide" class="docm-guide" style="display:none;">
+                현재 사무총장 결재 대기 중입니다. 부재 등 사유로 결재가 지연될 경우 아래 버튼으로 단계를 건너뛸 수 있습니다.
+            </div>
+        </div>
+        <div class="modal-footer" style="justify-content:space-between;">
+            <button class="btn-common btn-close" onclick="closeDocModal()">닫기</button>
+            <div style="display:flex; gap:8px;">
+                <button class="btn-common btn-delete" onclick="deleteDocFromModal()" style="background:#e74c3c; color:white;">문서 삭제</button>
+                <button class="btn-common" id="docm-skip-btn" onclick="confirmSkipStage()" style="background:#BA7517; color:white; display:none;">사무총장 건너뛰기</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 function escapeHtml(text) {
     if (!text) return "";
@@ -579,12 +621,12 @@ function loadDocs(page) {
             const docType = d.docType === 'G' ? 'G' : 'E';
             const docTypeLabel = docType === 'G' ? '기안' : '지출';
 
-            return `<tr>
+            return `<tr onclick="openDocModal('${d.docNum}')" style="cursor:pointer;">
                 <td><span class="doc-prefix">${prefix}</span><span class="doc-serial">${serial}</span></td>
                 <td style="text-align:left;"><span class="doc-type-badge doc-type-${docType}">${docTypeLabel}</span>${escapeHtml(d.subject)}</td>
                 <td>${escapeHtml(d.applicant)}</td>
                 <td><span class="badge ${badgeClass}">${d.stage}</span></td>
-                <td class="action-cell"><button class="action-btn btn-delete" onclick="deleteDoc('${d.docNum}')">삭제</button></td>
+                <td class="action-cell"><button class="action-btn btn-delete" onclick="event.stopPropagation(); deleteDoc('${d.docNum}')">삭제</button></td>
             </tr>`;
         }).join('');
 
@@ -897,6 +939,176 @@ function deleteUserFromModal() {
                 loadUsers();
             });
         }
+    });
+}
+
+let currentDocModalNum = null;
+
+function openDocModal(docNum) {
+    currentDocModalNum = docNum;
+    document.getElementById('docModal').style.display = 'flex';
+
+    fetch(`/api/admin/doc/${encodeURIComponent(docNum)}`)
+    .then(r => r.json())
+    .then(res => {
+        if (res.status !== 'Success') {
+            Swal.fire('오류', res.msg || '문서 조회 실패', 'error');
+            closeDocModal();
+            return;
+        }
+        const doc = res.doc;
+        const docType = doc.docType === 'G' ? 'G' : 'E';
+        const docTypeLabel = docType === 'G' ? '일반 기안' : '지출결의서';
+
+        document.getElementById('docm-num').textContent = doc.docNum;
+        document.getElementById('docm-type').innerHTML =
+            `<span class="doc-type-badge doc-type-${docType}">${docType === 'G' ? '기안' : '지출'}</span> ${docTypeLabel}`;
+        document.getElementById('docm-subject').textContent = doc.subject || '(제목 없음)';
+
+        let badgeClass = 'st-temp';
+        if (doc.status === '제출완료')      badgeClass = 'st-req';
+        else if (doc.status === '결재중')   badgeClass = 'st-ing';
+        else if (doc.status === '최종결재') badgeClass = 'st-done';
+        else if (doc.status === '지급완료') badgeClass = 'st-paid';
+        else if (doc.status === '결재완료') badgeClass = 'st-final-g';
+        else if (doc.status === '반려')     badgeClass = 'st-reject';
+        document.getElementById('docm-status').innerHTML =
+            `<span class="badge ${badgeClass}">${doc.status}</span>`;
+
+        document.getElementById('docm-applicant').textContent =
+            `${doc.appName || '-'} (${doc.appPos || '-'})`;
+        document.getElementById('docm-reqdate').textContent = doc.reqDate || '-';
+
+        // 금액은 지출결의서('E') 전용 — 일반 기안('G')에서는 행 자체를 숨김
+        const amountDt = document.getElementById('docm-amount-dt');
+        const amountDd = document.getElementById('docm-amount');
+        if (docType === 'G') {
+            amountDt.style.display = 'none';
+            amountDd.style.display = 'none';
+        } else {
+            amountDt.style.display = '';
+            amountDd.style.display = '';
+            amountDd.textContent = doc.totalAmount
+                ? Number(doc.totalAmount).toLocaleString('ko-KR') + '원'
+                : '-';
+        }
+
+        // 건너뛰기 이력 — dt/dd 두 요소를 함께 토글
+        const skipDt = document.getElementById('docm-skip-dt');
+        const skipInfo = document.getElementById('docm-skip-info');
+        if (doc.secSkippedBy) {
+            const dt = doc.secSkippedAt
+                ? new Date(doc.secSkippedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })
+                : '-';
+            skipInfo.innerHTML =
+                `<strong>${escapeHtml(doc.secSkippedBy)}</strong><br>` +
+                `<span style="color:#7f8c8d; font-size:11px;">${dt}</span><br>` +
+                `사유: ${escapeHtml(doc.secSkippedReason || '-')}`;
+            skipDt.style.display = '';
+            skipInfo.style.display = '';
+        } else {
+            skipDt.style.display = 'none';
+            skipInfo.style.display = 'none';
+        }
+
+        const skipBtn = document.getElementById('docm-skip-btn');
+        const skipGuide = document.getElementById('docm-skip-guide');
+        if (res.canSkipSecretary) {
+            skipBtn.style.display = '';
+            skipGuide.style.display = '';
+        } else {
+            skipBtn.style.display = 'none';
+            skipGuide.style.display = 'none';
+        }
+    })
+    .catch(err => {
+        console.error(err);
+        Swal.fire('오류', '문서 조회 중 통신 오류가 발생했습니다.', 'error');
+        closeDocModal();
+    });
+}
+
+function closeDocModal() {
+    document.getElementById('docModal').style.display = 'none';
+    currentDocModalNum = null;
+}
+
+function deleteDocFromModal() {
+    if (!currentDocModalNum) return;
+    const docNum = currentDocModalNum;
+    Swal.fire({
+        title: '영구 삭제?',
+        text: "되돌릴 수 없으며 첨부파일도 삭제됩니다.",
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#d33',
+        confirmButtonText: '삭제',
+        cancelButtonText: '취소'
+    }).then((r) => {
+        if (r.isConfirmed) {
+            fetch('/api/admin/delete_doc', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'CSRF-Token': getCsrfToken() },
+                body: JSON.stringify({ docNum })
+            })
+            .then(r => r.json())
+            .then(res => {
+                Swal.fire('삭제됨', res.msg, 'success');
+                closeDocModal();
+                loadDocs(currentDocPage);
+            });
+        }
+    });
+}
+
+function confirmSkipStage() {
+    if (!currentDocModalNum) return;
+    const docNum = currentDocModalNum;
+
+    Swal.fire({
+        title: '사무총장 단계 건너뛰기',
+        html:
+            '<div style="text-align:left; font-size:13px; color:#555; margin-bottom:10px;">' +
+            '문서를 사무총장 결재 없이 총동문회장 결재 단계로 넘깁니다.<br>' +
+            '사유는 감사 로그에 기록되며 총동문회장에게 메일로 전달됩니다.' +
+            '</div>',
+        input: 'textarea',
+        inputLabel: '건너뛰기 사유 (필수)',
+        inputPlaceholder: '예: 사무총장 해외 출장 중',
+        inputAttributes: { 'maxlength': 500, 'aria-label': '건너뛰기 사유' },
+        showCancelButton: true,
+        confirmButtonColor: '#BA7517',
+        confirmButtonText: '건너뛰기 실행',
+        cancelButtonText: '취소',
+        inputValidator: (value) => {
+            if (!value || !value.trim()) return '사유는 필수 입력입니다.';
+            if (value.length > 500)      return '사유는 500자 이내로 입력해 주세요.';
+        }
+    }).then((result) => {
+        if (!result.isConfirmed) return;
+        const reason = result.value.trim();
+
+        Swal.fire({ title: '처리 중...', didOpen: () => Swal.showLoading() });
+
+        fetch('/api/admin/skip-stage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'CSRF-Token': getCsrfToken() },
+            body: JSON.stringify({ docNum, reason })
+        })
+        .then(r => r.json())
+        .then(res => {
+            if (res.status === 'Success') {
+                Swal.fire('완료', res.msg, 'success');
+                closeDocModal();
+                loadDocs(currentDocPage);
+            } else {
+                Swal.fire('오류', res.msg || '처리 실패', 'error');
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            Swal.fire('오류', '서버와 통신 중 오류가 발생했습니다.', 'error');
+        });
     });
 }
 </script>

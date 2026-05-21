@@ -282,11 +282,13 @@ router.post('/api/submit', (req, res, next) => {
                 db.run(
                     // [수정] 회수·반려 후 재제출 시 기안자 정보 및 이전 결재자 흔적 초기화
                     //        이전 결재자 서명(secSig/presSig 등)이 DB에 잔존해 감사 트레일이 오염되는 문제를 해결
+                    // [STAGE_SKIP] 재제출 시 건너뛰기 흔적도 함께 초기화 (감사 트레일 무결성)
                     "UPDATE approvals SET \
                         subject=?, bodyContent=?, totalAmount=?, reqDate=?, items=?, status=?, file_paths=?, \
                         appPos=?, appName=?, appPhone=?, appSig=?, \
                         secName=NULL, secSig=NULL, secDate=NULL, \
                         presName=NULL, presSig=NULL, executionDate=NULL, \
+                        secSkippedBy=NULL, secSkippedAt=NULL, secSkippedReason=NULL, \
                         payDate=NULL \
                      WHERE docNum=?",
                     [f.subject, f.bodyContent, f.totalAmount, finalReqDate, itemsStr, initialStatus, filePathsStr,
@@ -539,7 +541,8 @@ router.post('/api/lock/release', (req, res) => {
 router.post('/api/recall', (req, res) => {
     const user = getUser(req);
     const { docNum } = req.body;
-    db.run(`UPDATE approvals SET status='작성중', secName=NULL, secSig=NULL, secDate=NULL, presName=NULL, presSig=NULL, executionDate=NULL, locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=? AND applicantEmail=? AND status IN ('제출완료', '결재중')`,
+    // [STAGE_SKIP] 회수 시 건너뛰기 흔적도 함께 초기화 (감사 트레일 무결성)
+    db.run(`UPDATE approvals SET status='작성중', secName=NULL, secSig=NULL, secDate=NULL, presName=NULL, presSig=NULL, executionDate=NULL, secSkippedBy=NULL, secSkippedAt=NULL, secSkippedReason=NULL, locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=? AND applicantEmail=? AND status IN ('제출완료', '결재중')`,
         [docNum, user.email], function(err) {
             if (err) return res.json({ status: 'Error', msg: err.message });
             if (this.changes === 0) return res.json({ status: 'Error', msg: '회수할 수 없는 상태입니다.' });

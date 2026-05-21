@@ -1129,6 +1129,14 @@
 		if (d.signatures.secretary && d.applicantPos !== '사무총장' && d.applicantPos !== '총동문회장') renderSig('sig-secretary', d.signatures.secretary);
     if (d.signatures.president && d.applicantPos !== '총동문회장') renderSig('sig-president', d.signatures.president);
 
+    // [STAGE_SKIP] 관리자가 사무총장 단계를 건너뛴 경우 사선(/) 표시.
+    //              자결재 케이스와 동일한 시각 처리.
+    //              자결재 슬래시(applicantPos==='사무총장'/'총동문회장')보다
+    //              나중에 적용되어도 결과가 동일하므로 순서 무관.
+    if (d.secSkippedBy) {
+        document.getElementById('sig-secretary').innerHTML = '<div class="slash-mark">/</div>';
+    }
+
     document.getElementById('subject').value = d.subject || "";
     document.getElementById('bodyContent').value = d.bodyContent || "";
     if(d.executionDate) document.getElementById('execDate').value = d.executionDate;
