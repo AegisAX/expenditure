@@ -43,8 +43,8 @@ db.serialize(() => {
   // 2. Settings 테이블
   db.run(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`);
 
-  // 3. Expenditures 테이블
-  db.run(`CREATE TABLE IF NOT EXISTS expenditures (
+  // 3. Approvals 테이블 (예전 이름: expenditures, PHASE C 에서 리네이밍)
+  db.run(`CREATE TABLE IF NOT EXISTS approvals (
     docNum TEXT PRIMARY KEY,
     applicantEmail TEXT,
     subject TEXT,
@@ -55,6 +55,7 @@ db.serialize(() => {
     payDate TEXT,
     items JSON,
     status TEXT,
+    docType TEXT NOT NULL DEFAULT 'E',
     appPos TEXT, appName TEXT, appPhone TEXT, appSig TEXT,
     secName TEXT, secSig TEXT, secDate TEXT,
     presName TEXT, presSig TEXT,
@@ -67,6 +68,13 @@ db.serialize(() => {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
+  // [B-1] 기존 DB 호환: docType 컬럼이 없으면 추가. 기존 행은 DEFAULT 'E' 로 백필됨.
+  db.run("ALTER TABLE approvals ADD COLUMN docType TEXT NOT NULL DEFAULT 'E'", (err) => {
+    if (err && !/duplicate column name/i.test(err.message)) {
+        console.error('[DB Migrate] approvals.docType 추가 실패:', err.message);   // 메시지 라벨 변경
+    }
+  });
+
   // [버전 호환성] 기존 DB 마이그레이션
   const lockColumns = [
     { name: 'locked_by_name',  type: 'TEXT' },
@@ -74,9 +82,9 @@ db.serialize(() => {
     { name: 'locked_at',       type: 'DATETIME' }
   ];
   lockColumns.forEach(col => {
-    db.run(`ALTER TABLE expenditures ADD COLUMN ${col.name} ${col.type}`, (err) => {
+    db.run(`ALTER TABLE approvals ADD COLUMN ${col.name} ${col.type}`, (err) => {
       if (err && !/duplicate column name/i.test(err.message)) {
-        console.error(`[DB Migrate] expenditures.${col.name} 추가 실패:`, err.message);
+        console.error(`[DB Migrate] approvals.${col.name} 추가 실패:`, err.message);
       }
     });
   });
@@ -101,7 +109,13 @@ db.serialize(() => {
   // 기본 정보 설정
   const defaultSettings = [
     { key: 'address', value: '(04210) 서울특별시 마포구 마포대로14길 14(공덕동), 태영빌딩 6층 (제20대 금오공업고등학교 총동문회)' },
-    { key: 'admin_phone', value: '02-3275-0118' }
+    { key: 'admin_phone', value: '02-3275-0118' },
+    // [A-1] 메일 설정 기본값 (관리자 화면에서 편집)
+    { key: 'smtp_host',      value: '' },
+    { key: 'smtp_port',      value: '465' },
+    { key: 'smtp_user',      value: '' },
+    { key: 'smtp_pass',      value: '' },
+    { key: 'mail_from_name', value: '금오공고 총동문회 사무국' }
   ];
   defaultSettings.forEach(setting => {
     db.run(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`, [setting.key, setting.value]);

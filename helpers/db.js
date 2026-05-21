@@ -60,7 +60,7 @@ function getSiteUrl() {
 function clearStaleLocks() {
     // [수정] lock acquire/form 체크와 동일한 3분 기준으로 통일
     const timeout = new Date(Date.now() - 3 * 60 * 1000).toISOString();
-    db.run("UPDATE expenditures SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE locked_at < ?", [timeout]);
+    db.run("UPDATE approvals SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE locked_at < ?", [timeout]);
 }
 
 function logAction(req, action, details) {
@@ -74,22 +74,56 @@ function logAction(req, action, details) {
     );
 }
 
+// [A-1] .env의 SMTP_* 값을 DB settings 로 1회 이관
+// DB의 smtp_host가 비어있고 .env에 SMTP_HOST가 있을 때만 동작
+// 이미 관리자가 DB에서 설정을 바꾼 뒤라면 절대 덮어쓰지 않음
+function migrateEnvMailToDB() {
+    db.get("SELECT value FROM settings WHERE key = 'smtp_host'", [], (err, row) => {
+        if (err) {
+            console.error('[DB Migrate] smtp_host 조회 실패:', err.message);
+            return;
+        }
+        const dbHostEmpty = !row || !row.value;
+        const envHost = process.env.SMTP_HOST;
+        if (!dbHostEmpty || !envHost) return;
+
+        const envMap = {
+            smtp_host: process.env.SMTP_HOST || '',
+            smtp_port: process.env.SMTP_PORT || '465',
+            smtp_user: process.env.SMTP_USER || '',
+            smtp_pass: process.env.SMTP_PASS || ''
+        };
+        const stmt = db.prepare("UPDATE settings SET value = ? WHERE key = ?");
+        Object.entries(envMap).forEach(([k, v]) => {
+            stmt.run([v, k], (e) => {
+                if (e) console.error(`[DB Migrate] .env → DB 이관 실패(${k}):`, e.message);
+            });
+        });
+        stmt.finalize(() => {
+            console.log('>> [DB Migrate] .env의 SMTP 설정을 DB로 1회 이관했습니다. 이후에는 관리자 화면에서 관리됩니다.');
+        });
+    });
+}
+
 function checkAndMigrateDB() {
     console.log(">> [DB Check] 데이터베이스 컬럼 검사 시작...");
     const requiredColumns = [
         { name: 'locked_by_name', type: 'TEXT' },
         { name: 'locked_by_email', type: 'TEXT' },
-        { name: 'locked_at', type: 'TEXT' }
+        { name: 'locked_at', type: 'TEXT' },
+        // [B-1] docType 컬럼. 'E'(지출결의서, 기본) / 'G'(일반 기안).
+        //       기존 행은 'E' 로 백필된다.
+        { name: 'docType', type: "TEXT NOT NULL DEFAULT 'E'" }
     ];
-    db.all("PRAGMA table_info(expenditures)", [], (err, columns) => {
+    db.all("PRAGMA table_info(approvals)", [], (err, columns) => {
         if (err) return console.error(">> [DB Error] 조회 실패:", err);
         const existingNames = columns.map(c => c.name);
         let added = 0;
         requiredColumns.forEach(col => {
             if (!existingNames.includes(col.name)) {
-                db.run(`ALTER TABLE expenditures ADD COLUMN ${col.name} ${col.type}`, (err) => {
+                db.run(`ALTER TABLE approvals ADD COLUMN ${col.name} ${col.type}`, (err) => {
                     if (err && !/duplicate column name/i.test(err.message)) {
-                        console.error(`[DB Migrate Runtime] expenditures.${col.name} 추가 실패:`, err.message);
+                        console.error(`[DB Migrate Runtime] approvals.${col.name} 추가 실패:`, err.message);
                     }
                 });
                 added++;
@@ -108,7 +142,7 @@ function checkAndMigrateDB() {
                     db.run(
                         // presDate가 있는 행(= 총동문회장이 결재한 문서)은
                         // executionDate 기존값(기안일)과 무관하게 결재일로 덮어쓴다.
-                        `UPDATE expenditures SET executionDate = presDate
+                        `UPDATE approvals SET executionDate = presDate
                          WHERE presDate IS NOT NULL AND presDate != ''`,
                         (e) => {
                             if (!e) console.log(">> [DB Migrate] presDate -> executionDate 복사 완료.");
@@ -126,7 +160,7 @@ function checkAndMigrateDB() {
             for (const target of dropTargets) {
                 if (!existingNames.includes(target.col)) continue;
                 if (target.before) await target.before();
-                db.run(`ALTER TABLE expenditures DROP COLUMN ${target.col}`, (e) => {
+                db.run(`ALTER TABLE approvals DROP COLUMN ${target.col}`, (e) => {
                     if (!e) {
                         console.log(`>> [DB Migrate] 컬럼 삭제 완료: ${target.col}`);
                     } else {
@@ -136,8 +170,74 @@ function checkAndMigrateDB() {
             }
         })();
 
+        // [A-1] .env → DB 1회 이관 시도
+        migrateEnvMailToDB();
+
         console.log(`>> [DB Check] 검사 완료. (추가된 컬럼: ${added}개)`);
     });
 }
 
-module.exports = { getTodayKST, getUser, getUserByPos, getNextDocNum, getSiteUrl, clearStaleLocks, logAction, checkAndMigrateDB };
+// [A-1] settings 키 배열을 한 번에 조회하여 {key: value} 객체로 반환.
+// 누락된 key는 빈 문자열로 채워준다.
+function getSettings(keys) {
+    return new Promise((resolve, reject) => {
+        if (!Array.isArray(keys) || keys.length === 0) return resolve({});
+        const placeholders = keys.map(() => '?').join(',');
+        db.all(
+            `SELECT key, value FROM settings WHERE key IN (${placeholders})`,
+            keys,
+            (err, rows) => {
+                if (err) return reject(err);
+                const result = {};
+                keys.forEach(k => { result[k] = ''; });
+                (rows || []).forEach(r => { result[r.key] = r.value == null ? '' : String(r.value); });
+                resolve(result);
+            }
+        );
+    });
+}
+
+// [A-1] settings 일괄 upsert. undefined 값은 스킵(미변경), 빈 문자열은 저장.
+// 원자성 보장을 위해 BEGIN IMMEDIATE 트랜잭션 사용.
+function saveSettings(obj) {
+    return new Promise((resolve, reject) => {
+        if (!obj || typeof obj !== 'object') return resolve();
+        const entries = Object.entries(obj).filter(([, v]) => v !== undefined);
+        if (entries.length === 0) return resolve();
+
+        db.serialize(() => {
+            db.run('BEGIN IMMEDIATE', (e) => {
+                if (e) return reject(e);
+                const stmt = db.prepare(
+                    'INSERT INTO settings (key, value) VALUES (?, ?) ' +
+                    'ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+                );
+                let pending = entries.length;
+                let failed = false;
+                entries.forEach(([k, v]) => {
+                    stmt.run([k, v == null ? '' : String(v)], (err) => {
+                        if (failed) return;
+                        if (err) {
+                            failed = true;
+                            db.run('ROLLBACK', () => reject(err));
+                            return;
+                        }
+                        pending -= 1;
+                        if (pending === 0) {
+                            stmt.finalize((ferr) => {
+                                if (ferr) return db.run('ROLLBACK', () => reject(ferr));
+                                db.run('COMMIT', (cerr) => cerr ? reject(cerr) : resolve());
+                            });
+                        }
+                    });
+                });
+            });
+        });
+    });
+}
+
+module.exports = {
+    getTodayKST, getUser, getUserByPos, getNextDocNum, getSiteUrl,
+    clearStaleLocks, logAction, checkAndMigrateDB,
+    getSettings, saveSettings
+};
