@@ -1332,6 +1332,29 @@
             }
         }
 
+        // [감사로그] 인쇄 다이얼로그 열림 / 닫힘 액션 기록.
+        //  - PRINT_DONE 은 사용자의 "저장/인쇄/취소" 를 구분하지 못하고
+        //    다이얼로그가 닫힌 시점에 동일하게 발생함 (브라우저 한계).
+        try {
+            const csrf = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            const docNumForLog = document.getElementById('trackingDocNum').value;
+            if (docNumForLog) {
+                fetch('/api/log/print-open', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'CSRF-Token': csrf },
+                    body: JSON.stringify({ docNum: docNumForLog })
+                }).catch(() => {});
+                // 인쇄 다이얼로그 닫힘 1회만 잡도록 once: true
+                window.addEventListener('afterprint', () => {
+                    fetch('/api/log/print-close', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'CSRF-Token': csrf },
+                        body: JSON.stringify({ docNum: docNumForLog })
+                    }).catch(() => {});
+                }, { once: true });
+            }
+        } catch (e) { /* 로그 실패는 인쇄 동작에 영향 없음 */ }
+
         // 브라우저가 오버레이 숨김을 화면에 반영할 시간 확보 후 인쇄 호출
         await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 
@@ -1346,6 +1369,19 @@
         const title = document.getElementById('previewTitle');
         const dlBtn = document.getElementById('downloadBtn');
         const msg = document.getElementById('previewMsg');
+
+        // [감사로그] 첨부파일 미리보기 액션 기록 (fire-and-forget)
+        try {
+            const docNum = document.getElementById('trackingDocNum').value;
+            if (docNum) {
+                const fileId = url.replace(/^\/api\/download\//, '');
+                fetch('/api/log/preview', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'CSRF-Token': document.querySelector('meta[name="csrf-token"]').getAttribute('content') },
+                    body: JSON.stringify({ docNum, fileId })
+                }).catch(() => {});
+            }
+        } catch (e) { /* 로그 실패는 미리보기 동작에 영향 없음 */ }
 
         // 1. 초기화
         container.innerHTML = ""; // 기존 내용 비우기

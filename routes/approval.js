@@ -666,4 +666,39 @@ router.post('/api/file/delete', async (req, res) => {
     );
 });
 
+// [감사로그] 첨부파일 미리보기 / 인쇄 다이얼로그 열림·닫힘 기록.
+//  - 클라이언트의 명시적 액션 시점을 서버 라우트에서 잡을 수 없는 케이스를 보완.
+//  - 액션명은 서버에서 하드코딩되어 클라이언트가 임의의 액션을 만들지 못하도록 함.
+//  - docNum 은 SELECT 로 존재 확인 후 제목/상태를 로그에 함께 기록.
+
+function logDocAction(req, res, action, extraDetailFn) {
+    const { docNum } = req.body || {};
+    if (!docNum) return res.json({ status: 'Error', msg: 'docNum 누락' });
+
+    db.get("SELECT subject, status FROM approvals WHERE docNum = ?", [docNum], (err, doc) => {
+        if (err)  return res.json({ status: 'Error', msg: 'DB 조회 실패' });
+        if (!doc) return res.json({ status: 'Error', msg: '문서를 찾을 수 없습니다.' });
+
+        const subjectForLog = (doc.subject && doc.subject.trim()) ? doc.subject : '(제목 없음)';
+        const extra = extraDetailFn ? extraDetailFn(req.body) : '';
+        const detail = `${docNum} (제목: ${subjectForLog}, 상태: ${doc.status})${extra}`;
+        logAction(req, action, detail);
+        res.json({ status: 'Success' });
+    });
+}
+
+router.post('/api/log/preview', (req, res) => {
+    // 미리보기 대상 파일명도 함께 기록 (서버 디렉토리 경로는 노출하지 않음)
+    logDocAction(req, res, 'FILE_PREVIEW', (body) => {
+        const fileId = (body && body.fileId) ? String(body.fileId) : '';
+        const displayName = fileId.split('/').pop();
+        return displayName ? ` - 미리보기: ${displayName}` : '';
+    });
+});
+
+router.post('/api/log/print-open',  (req, res) => logDocAction(req, res, 'PRINT_OPEN'));
+// PRINT_CLOSE: 브라우저 afterprint 이벤트 시점.
+// 다이얼로그가 닫힌 사실만 기록 — 실제 저장/인쇄와 취소를 구분하지 않음 (브라우저 한계).
+router.post('/api/log/print-close', (req, res) => logDocAction(req, res, 'PRINT_CLOSE'));
+
 module.exports = router;
