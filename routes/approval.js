@@ -9,6 +9,7 @@ const { uploadDir, upload, saveFile, MAX_UPLOAD_MB } = require('../helpers/file'
 const { getTodayKST, getUser, getUserByPos, getNextDocNum, getSiteUrl, logAction } = require('../helpers/db');
 const { makeEmailHtml, sendEmail } = require('../helpers/email');
 const { approvalValidator, validatePassword, normalizeApprovalBody } = require('../middleware/validators');
+const { sanitizeBodyHtml } = require('../helpers/sanitize');
 
 // [B-2] docType 별 메타 정보. 라벨/접두어/파일명 라벨 분기에 사용.
 //  - E: 지출결의서 (기존 플로우)
@@ -180,6 +181,15 @@ router.post('/api/submit', (req, res, next) => {
 }, normalizeApprovalBody, approvalValidator, async (req, res) => {
     const user = getUser(req);
     const f = req.body;
+
+    // [에디터] 본문 HTML sanitize.
+    //   클라이언트(Toast UI Editor)에서 받은 HTML을 화이트리스트 기반으로 정화한다.
+    //   - 허용: 기본 서식, 리스트, 표, 링크
+    //   - 차단: script/iframe/이벤트핸들러/style 태그, javascript: URL, 본문 내 <img>
+    //   여기서 sanitize 한 결과가 그대로 DB로 들어가므로
+    //   화면 표시 시에는 별도 escape 없이 .innerHTML 로 렌더링해도 안전하다.
+    f.bodyContent = sanitizeBodyHtml(f.bodyContent);
+
     let finalDocNum = f.docNum || `TEMP-${Date.now()}`;
     // 클라이언트가 보낼 수 있는 status는 '작성중'과 '제출완료'만 허용
     // 나머지는 서버에서 position 기반으로 결정

@@ -4,21 +4,23 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="csrf-token" content="<%= csrfToken %>">
+<!-- [PWA] 옛 service worker / 캐시 자동 정리 -->
+<script src="/js/sw-bootstrap.js?v=2"></script>
 <meta name="theme-color" content="#ffffff">
 <link rel="manifest" href="/manifest.json">
 <link rel="apple-touch-icon" href="/icons/icon-192x192.png">
 <title>관리자 페이지</title>
 <script>
-if ('serviceWorker' in navigator) {
+if (false /* PWA 일시 비활성 */ && 'serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/service-worker.js')
+        /* [PWA 일시 비활성] */ navigator.serviceWorker.register('/service-worker.js')
         .then(reg => console.log('Service Worker registered.', reg))
         .catch(err => console.log('Service Worker registration failed.', err));
     });
 }
     
 document.addEventListener('DOMContentLoaded', function() {
-    PullToRefresh.init({
+    false && PullToRefresh.init({
         mainElement: '.container', 
         triggerElement: 'body',    
         onRefresh: function() { window.location.reload(); },
@@ -41,6 +43,7 @@ window.addEventListener('load', function() {
 });
 </script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="/js/csrf-guard.js?v=2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pulltorefreshjs/0.1.22/index.umd.min.js"></script>
 
 <style>

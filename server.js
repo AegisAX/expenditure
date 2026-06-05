@@ -62,19 +62,35 @@ app.use(cookieParser());
 app.use(session({
     store: new SQLiteStore({ db: 'sessions.db', dir: './db', concurrentDB: true }),
     secret: process.env.SESSION_SECRET || 'secret-key-replace-me',
-    resave: false,
-    saveUninitialized: false,
+    // [수정] csurf 가 GET /login 응답 시 req.session._csrf 에 secret 을 저장하지만,
+    //   resave:false + saveUninitialized:false 조합에서는 SQLite store 가 이를
+    //   영속화하지 않아 다음 POST 요청에서 session._csrf 가 NO 로 잡히고
+    //   CSRF mismatch 가 발생하는 사례가 확인됐다.
+    //   안전을 위해 두 옵션을 모두 활성화 — SQLite store 쓰기 부하는 미미.
+    resave: true,
+    saveUninitialized: true,
     rolling: true,
     cookie: {
         httpOnly: true,
         maxAge: 30 * 60 * 1000,
-        secure: 'auto',          // ← 요청별로 자동 판단 (HTTPS면 secure, HTTP면 일반)
+        // [수정] secure 를 명시적 boolean 으로.
+        //   'auto' 는 trust proxy + X-Forwarded-Proto 가 정확해야만 잘 동작하는데,
+        //   사내 reverse proxy 환경에서 헤더가 누락되면 secure=true 인 쿠키가 발급되어
+        //   브라우저가 쿠키를 무시 → 매 요청 새 세션 → CSRF mismatch 가 끊임없이 발생.
+        //   HTTPS 강제 환경에서만 true 로 두고, 그 외엔 false.
+        secure: process.env.HTTPS_ENFORCE === 'true',
         sameSite: 'lax'
     }
 }));
 
 app.use(csrf());
-app.use((req, res, next) => { res.locals.csrfToken = req.csrfToken(); next(); });
+app.use((req, res, next) => {
+    res.locals.csrfToken = req.csrfToken();
+    next();
+    // [주의] 이전에 추가했던 req.session.save 명시 호출은 SQLite store 의 동시 write 와
+    //   충돌해 모든 GET 요청이 hang 되는 사례가 확인되어 제거.
+    //   대신 session 옵션 resave:true + saveUninitialized:true 로 영속화를 보장한다.
+});
 
 app.use('/', authRoutes);
 app.use('/', requireLogin, approvalRoutes);
@@ -92,8 +108,25 @@ app.use((req, res) => res.redirect('/login'));
 
 app.use((err, req, res, next) => {
     if (err.code !== 'EBADCSRFTOKEN') return next(err);
-    console.error(`[CSRF Error] ${req.ip} - ${req.originalUrl}`);
-    res.status(403).json({ status: 'Error', msg: '보안 토큰이 만료되었거나 유효하지 않습니다.<br>페이지를 새로고침하세요.' });
+    // [진단] CSRF mismatch 원인 파악용 상세 로그.
+    //   - sessionID 가 매 요청마다 바뀌면 → 쿠키가 유지 안 되는 것 (HTTPS·proxy 환경 문제 의심)
+    //   - clientToken / sessionSecret 둘 다 있는데 mismatch 면 → 토큰 발급/사용 사이클 문제
+    const hdrToken    = req.headers['csrf-token'] || req.headers['x-csrf-token'];
+    const bodyToken   = (req.body && req.body._csrf) ? '(body)' : '';
+    const cookieSid   = req.headers.cookie && req.headers.cookie.includes('connect.sid') ? 'YES' : 'NO';
+    const sessionId   = req.sessionID || '(none)';
+    const sessionHas  = req.session && req.session._csrf ? 'YES' : 'NO';
+    console.error(
+        `[CSRF Error] ${req.ip} - ${req.method} ${req.originalUrl}\n` +
+        `   sessionID=${sessionId}  session._csrf?=${sessionHas}  cookie.connect.sid?=${cookieSid}\n` +
+        `   client header token=${hdrToken ? 'present(' + String(hdrToken).slice(0,8) + '...)' : 'MISSING'}  ${bodyToken}\n` +
+        `   X-Forwarded-Proto=${req.headers['x-forwarded-proto'] || '(none)'}  Host=${req.headers.host}`
+    );
+    res.status(403).json({
+        status: 'Error',
+        code: 'CSRF_INVALID',
+        msg: '보안 토큰이 만료되었거나 유효하지 않습니다.<br>페이지를 새로고침하세요.'
+    });
 });
 
 setTimeout(checkAndMigrateDB, 1000);
