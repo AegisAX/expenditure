@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="csrf-token" content="<%= csrfToken %>">
+  <!-- [PWA] 옛 service worker / 캐시 자동 정리 -->
+  <script src="/js/sw-bootstrap.js?v=2"></script>
   <title>정보 수정 - 금오공고 총동문회</title>
   
   <link rel="manifest" href="/manifest.json">
@@ -11,9 +13,9 @@
   <link rel="apple-touch-icon" href="/icons/icon-192x192.png">
 
   <script>
-    if ('serviceWorker' in navigator) {
+    if (false /* PWA 일시 비활성 */ && 'serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/service-worker.js')
+        /* [PWA 일시 비활성] */ navigator.serviceWorker.register('/service-worker.js')
           .then(reg => console.log('Service Worker registered.', reg))
           .catch(err => console.log('Service Worker registration failed.', err));
       });
@@ -33,8 +35,8 @@
   
   <script src="https://cdn.jsdelivr.net/npm/signature_pad@4.0.0/dist/signature_pad.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-  <script src="/js/csrf-guard.js"></script>
-
+  <script src="/js/csrf-guard.js?v=2"></script>
+  
   <style>
     /* === [PWA 네이티브 앱 느낌 최적화] === */
     html, body {

@@ -5,14 +5,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="csrf-token" content="<%= csrfToken %>">
+  <!-- [PWA] 옛 service worker / 캐시 자동 정리 (한 번 reload 후 v2 로 등록) -->
+  <script src="/js/sw-bootstrap.js?v=2"></script>
   <title>지출결의서</title>
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#2c3e50">
   <link rel="apple-touch-icon" href="/icons/icon-192x192.png">
   <script>
-    if ('serviceWorker' in navigator) {
+    if (false /* PWA 일시 비활성 */ && 'serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/service-worker.js')
+        /* [PWA 일시 비활성] */ navigator.serviceWorker.register('/service-worker.js')
           .then(reg => console.log('Service Worker registered.', reg))
           .catch(err => console.log('Service Worker registration failed.', err));
       });
@@ -20,7 +22,7 @@
 
     // [PWA] 당겨서 새로고침 (Pull-to-Refresh) 활성화
     document.addEventListener('DOMContentLoaded', function() {
-        PullToRefresh.init({
+        false && PullToRefresh.init({
             mainElement: '#form-content', // [수정] .page -> #form-content (타이틀 분리)
             triggerElement: 'body',       // 터치는 화면 전체에서 감지
             onRefresh: function() {
@@ -60,8 +62,14 @@
   </script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-  <script src="/js/csrf-guard.js"></script>
+  <script src="/js/csrf-guard.js?v=2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pulltorefreshjs/0.1.22/index.umd.min.js"></script>
+  <!-- [에디터] CKEditor 5 Super-Build (모든 무료 플러그인 포함, 셀 병합 지원).
+       단일 ckeditor.js 에 의존성이 모두 번들되어 있어 사내망에서도 안정적.
+       한국어 i18n 은 translations/ko.js 를 추가 로드.
+       ?v=2 cache-busting — 옛 service worker 캐시 응답을 우회. -->
+  <script src="/vendor/ckeditor/ckeditor.js?v=2"></script>
+  <script src="/vendor/ckeditor/translations/ko.js?v=2"></script>
   <style>
 	/* === [PWA 네이티브 앱 느낌 최적화] === */
     
@@ -90,21 +98,16 @@
       -webkit-user-select: text;
     }
 
-    /* [수정] 상단 헤더 Sticky 처리 및 디자인 개선 */
+    /* [수정] 상단 헤더 디자인.
+       이전에 main-title 을 position:sticky 로 화면 상단에 박아 두었지만,
+       본문 길어졌을 때 CKEditor toolbar 가 그 아래(top:56)에 fixed 되면서
+       타이틀과 toolbar 사이에 빈 공간이 끼는 시각적 문제가 있었다.
+       타이틀은 일반 흐름으로 두고, toolbar 가 화면 최상단(top:0)에 sticky 되도록 한다. */
     .header-area, .main-title {
-        position: sticky;
-        top: 0;
-        z-index: 100;
-        
-        /* [핵심 수정] 배경색을 회색(#f0f2f5)에서 흰색(#ffffff)으로 변경 */
-        background-color: #ffffff; 
-        
-        /* [추가] 스크롤 시 본문과 구분되도록 하단 테두리 추가 */
-        border-bottom: 1px solid #e1e4e8; 
-        
-        /* [추가] 타이틀 주변 여백 정리 (깔끔하게 보이도록) */
-        margin: -10px -8px 10px -8px; /* page padding을 상쇄하여 꽉 차게 만듦 */
-        padding: 15px 0; /* 내부 여백 확보 */
+        background-color: #ffffff;
+        border-bottom: 1px solid #e1e4e8;
+        margin: -10px -8px 10px -8px;
+        padding: 15px 0;
     }
 	
 
@@ -210,12 +213,117 @@
     /* 증빙자료 라벨 기본 너비 — colgroup 의 col-label(18%) 사용으로 통일 */
     /* .attach-label { width: 130px; } */
 	
-	/* [추가] 상세 내용 입력란 자동 높이 조절용 스타일 */
-    #bodyContent {
-      overflow-y: hidden; /* 스크롤바 숨김 */
-      resize: none;       /* 수동 크기 조절 비활성 */
-      min-height: 150px;  /* 최소 높이 설정 */
+	/* [에디터] 숨겨진 textarea — 검증/이전 코드 호환용. 실제 입력은 CKEditor 사용 */
+    #bodyContent { display: none !important; }
+
+    /* [에디터] CKEditor 5 컨테이너 */
+    #bodyContentEditor {
+        min-height: 220px;
+        margin: 0;
     }
+    #bodyContentEditor .ck-editor__editable {
+        font-family: -apple-system, BlinkMacSystemFont, "Malgun Gothic", sans-serif;
+        font-size: 14px;
+        line-height: 1.5;
+        min-height: 200px;
+    }
+    #bodyContentEditor .ck.ck-editor__main > .ck-editor__editable {
+        border-color: #d0d0d0;
+    }
+    /* [에디터] CKEditor 가 기본으로 <p>/<h*>/<ul>/<ol>/<li> 에 큰 마진(약 1em ~ 1.5em)을 부여해
+       지출결의서·기안문 같은 공문 양식에는 단락 사이가 너무 벌어진다.
+       편집 화면(.ck-content), VIEW(.ck-content), 인쇄 모두 일관되게 좁힌다. */
+    .ck-content p,
+    .ck-content ul,
+    .ck-content ol,
+    .ck-content blockquote {
+        margin: 0 0 0.4em 0 !important;
+    }
+    .ck-content h1, .ck-content h2, .ck-content h3,
+    .ck-content h4, .ck-content h5, .ck-content h6 {
+        margin: 0.6em 0 0.3em 0 !important;
+        line-height: 1.3;
+    }
+    .ck-content li { margin-bottom: 0.2em; }
+    /* [표 wrapper] 기본 마진은 위/아래만 살리고 좌/우는 0.
+       정렬(좌/가운데/우)은 JS(applyTableAlignment) 가 inline style 로 figure 에 직접 적용한다.
+       inline style 이 더 우선하므로 사용자의 정렬 선택이 그대로 반영된다.
+
+       - display: block + width: fit-content : block 이므로 다음 단락이 옆에 흐르지 않고
+         아래에 위치한다. width: fit-content 로 표 컨텐츠 너비만큼만 차지하므로
+         margin-left/right: auto 가운데 정렬도 자연스럽게 동작.
+       - 추가 안전장치 : figure.table 직후 ::after 와 다음 형제에 clear:both 를 강제해
+         혹시 float 이 남아있어도 다음 컨텐츠가 옆에 못 오게 차단. */
+    .ck-content figure.table {
+        display: block;
+        width: -moz-fit-content;
+        width: fit-content;
+        max-width: 100%;
+        margin-top: 0.4em;
+        margin-bottom: 0.4em;
+    }
+    .ck-content figure.table::after {
+        content: "";
+        display: block;
+        clear: both;
+    }
+    .ck-content figure.table + * {
+        clear: both !important;
+    }
+    .ck-content table { border-collapse: collapse; }
+    .ck-content table th,
+    .ck-content table td {
+        border: 1px solid #999;
+        padding: 4px 8px;
+        vertical-align: middle;
+    }
+    /* [표 셀 안 단락] CKEditor 가 td/th 안에 자동으로 <p> 를 wrapping 한다.
+       위의 .ck-content p { margin: 0 0 0.4em 0 } 가 셀 안에도 적용되어
+       텍스트가 셀 위쪽으로 치우치는(아래 공백이 더 큰) 문제가 생긴다.
+       표 셀 안 단락은 마진 0 으로 재정의해 셀 가운데 정렬을 보장. */
+    .ck-content table th p,
+    .ck-content table td p {
+        margin: 0 !important;
+    }
+    /* [표 정렬] figure.table 에 float/margin 이 들어오면 표 전체가 좌/우/가운데 정렬된다.
+       sanitize 가 float·margin 을 보존하면 화면에서도 그대로 적용. */
+
+    /* [VIEW/인쇄] 사용자가 의도적으로 넣은 빈 단락(공백 줄)도 그대로 보존한다.
+       이전에는 CKEditor 가 Enter 두 번에 만드는 <p>&nbsp;</p> 를 줄이려 했지만,
+       사용자가 의도한 공백 줄까지 제거되어 작성·VIEW 화면이 달라지는 문제가 있었다.
+       빈 단락은 표시 그대로 두고, 간격은 위의 .ck-content p {margin:0 0 0.4em 0} 정책으로 통일. */
+
+    /* [에디터] toolbar sticky 는 CKEditor 5 자체 동작에 맡긴다 (ck-sticky-panel).
+       이전엔 JS 로 직접 position:fixed 처리를 시도했으나 CKEditor 자체 sticky 와 충돌해
+       toolbar 위에 빈 공간이 생기는 문제가 발견되어 제거. */
+    /* CKEditor 5 가 자동으로 contextual table toolbar 를 표 안에서 표시한다.
+        (행/열 추가·삭제, 셀 병합·해제, 표/셀 속성 — 한국어 UI 자동 적용) */
+    /* VIEW 모드(읽기 전용)일 때 보여줄 본문 HTML 뷰 */
+    #bodyContentView {
+        display: none;
+        padding: 12px 5px;
+        font-size: 14px;
+        line-height: 1.6;
+        word-break: break-word;
+    }
+    #bodyContentView img { max-width: 100%; height: auto; }
+    #bodyContentView table { border-collapse: collapse; margin: 8px 0; }
+    #bodyContentView table th,
+    #bodyContentView table td { border: 1px solid #d0d0d0; padding: 4px 8px; }
+    #bodyContentView blockquote {
+        border-left: 4px solid #d0d0d0;
+        margin: 8px 0; padding: 4px 12px; color: #555;
+    }
+    #bodyContentView pre {
+        background: #f5f5f5; padding: 8px 12px; border-radius: 4px;
+        overflow-x: auto; font-family: Menlo, Consolas, monospace; font-size: 13px;
+    }
+    #bodyContentView code {
+        background: #f0f0f0; padding: 1px 5px; border-radius: 3px;
+        font-family: Menlo, Consolas, monospace; font-size: 13px;
+    }
+    body.view-mode #bodyContentEditor { display: none; }
+    body.view-mode #bodyContentView   { display: block; }
 	
 	/* [수정] 미리보기 모달 스타일 (화면 정중앙 고정) */
     .modal-overlay { 
@@ -476,6 +584,8 @@
       .page { width: 210mm; min-height: 296mm; padding: 15mm; box-sizing: border-box; border: none; margin: 0; page-break-after: auto; box-shadow: none; }
       .main-title { position: static !important; margin: 0 0 20px 0 !important; padding: 0 !important; border-bottom: none !important; }
       #bodyContent { display: none !important; }
+      /* [에디터] 인쇄 시 에디터/뷰는 숨기고, 인쇄 전용 div 만 보여준다. */
+      #bodyContentEditor, #bodyContentView { display: none !important; }
       /* 인쇄 시 본문 영역에 최소 높이 부여하여 첫 페이지가 자연스럽게 채워지도록 함.
          A4 사용 가능 영역(약 267mm) 기준, 상하 결재선/제목/집행내역 등을 제외하고
          본문이 약 100mm 이상 차지해야 페이지가 비어보이지 않음. */
@@ -484,6 +594,18 @@
           min-height: 100mm;
           padding: 15px 5px !important;
           box-sizing: border-box;
+          /* [에디터] HTML 렌더로 바뀌므로 pre-wrap 대신 일반 흐름 */
+          white-space: normal;
+          word-break: break-word;
+          font-size: 14px;
+          line-height: 1.6;
+      }
+      #print-body-content-view img { max-width: 100%; height: auto; }
+      #print-body-content-view table { border-collapse: collapse; margin: 6px 0; }
+      #print-body-content-view table th,
+      #print-body-content-view table td { border: 1px solid #888; padding: 3px 6px; }
+      #print-body-content-view blockquote {
+          border-left: 3px solid #888; margin: 6px 0; padding: 2px 10px; color: #444;
       }
       /* 인쇄 시 로딩 오버레이/미리보기 모달 자체를 숨김 */
       #print-preparing-overlay, #previewModal, .swal2-container { display: none !important; }
@@ -524,8 +646,11 @@
   body.mode-G #add-btn-area {
     display: none !important;
   }
-  body.mode-G #bodyContent {
+  body.mode-G #bodyContentEditor {
     min-height: 480px;       /* 집행내역 영역이 비는 만큼 본문 확대 */
+  }
+  body.mode-G #bodyContentView {
+    min-height: 480px;
   }
   </style>
 </head>
@@ -607,8 +732,17 @@
 		<table style="border-top: none;">
 		  <tr>
 			  <td class="content-cell" style="padding: 15px; vertical-align: top; min-height: 180px;">
-				  <textarea id="bodyContent" rows="10" placeholder="내용을 입력하세요." oninput="autoResize(this)"></textarea>
-				  <div id="print-body-content-view" class="print-only-div"></div>
+				  <!-- [에디터] WRITE 모드: Quill 마운트 지점.
+				                VIEW  모드: HTML 렌더링 전용 view div 사용.
+				                인쇄    : print-body-content-view 에 HTML 주입.
+				       숨겨진 textarea(#bodyContent)는 레거시 코드 호환·검증용으로 남겨두지만
+				       실제 사용자 입력은 에디터에서 받는다.
+				       VIEW/인쇄 div 에 'ql-editor' 클래스를 부여해 Quill 의 단락·리스트·표 등
+				       기본 스타일을 편집 화면과 동일하게 적용한다. -->
+				  <textarea id="bodyContent" placeholder="내용을 입력하세요."></textarea>
+				  <div id="bodyContentEditor"></div>
+				  <div id="bodyContentView" class="ck-content" style="padding:0;"></div>
+				  <div id="print-body-content-view" class="ck-content print-only-div" style="padding:0;"></div>
 			  </td>
 		  </tr>
 		</table>
@@ -745,6 +879,232 @@
     function unformatNum(s) { return parseFloat(s.toString().replace(/,/g, '')) || 0; }
     function autoResize(el) { el.style.height = 'auto'; el.style.height = (el.scrollHeight) + 'px'; }
 
+    // ===========================================================================
+    // [에디터] CKEditor 5 Classic 관리 헬퍼
+    //   - bodyEditor: WRITE 모드에서 마운트된 CKEditor 인스턴스 (없으면 null)
+    //   - looksLikeHtml(s): 문자열에 HTML 태그가 포함되어 있는지 빠른 휴리스틱
+    //   - escapeHtml(s): plain text를 안전한 HTML로 변환 (XSS 방지)
+    //   - renderBodyToView(html, target): VIEW/인쇄용 div에 본문 렌더링.
+    //                                     legacy plain text는 escape + \n→<br> 처리.
+    //   - initBodyEditor(initialHtml): WRITE 모드에서 에디터 마운트.
+    //   - getBodyEditorHTML(): submit 직전에 에디터 HTML 추출.
+    //   - getBodyEditorPlainLength(): 검증용 텍스트 길이.
+    // ===========================================================================
+    let bodyEditor = null;
+
+    function looksLikeHtml(s) {
+        return typeof s === 'string' && /<[a-z][\s\S]*?>/i.test(s);
+    }
+    function escapeHtml(s) {
+        if (s == null) return '';
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+    // legacy 호환: 저장된 본문이 plain text(태그 없음)면 안전하게 변환해 보여준다.
+    function renderBodyToView(html, target) {
+        if (!target) return;
+        const value = html || '';
+        if (looksLikeHtml(value)) {
+            // 서버에서 sanitize 된 HTML이므로 그대로 렌더링 가능
+            target.innerHTML = value;
+        } else {
+            target.innerHTML = escapeHtml(value).replace(/\n/g, '<br>');
+        }
+        // VIEW/인쇄에서도 표 정렬을 figure 에 강제 매핑
+        applyTableAlignment(target);
+    }
+    // [에디터] toolbar sticky 는 CKEditor 5 자체 동작(ck-sticky-panel) 에 맡긴다.
+    //   이전에 직접 JS 로 position:fixed 처리하는 setupBodyToolbarStick 함수를 만들었으나
+    //   CKEditor 자체 sticky 와 충돌해 toolbar 위에 빈 공간이 생기는 사례가 확인되어 제거.
+
+    // [표 정렬 후처리] CKEditor 5 는 가운데 정렬을 안쪽 <table style="margin-left:auto;margin-right:auto">
+    //   로, 우측 정렬을 <figure style="float:right"> 로 표현한다. 외부 figure 의 마진 CSS 가
+    //   table 의 inline 정렬보다 우선되어 가운데 정렬이 적용되지 않는 문제가 있어,
+    //   figure / table 양쪽의 style 을 읽어 figure 에 정렬을 일관되게 다시 적용한다.
+    //   editable(작성 화면) 과 VIEW div 모두에서 호출한다.
+    function applyTableAlignment(root) {
+        if (!root || !root.querySelectorAll) return;
+        root.querySelectorAll('figure.table').forEach(fig => {
+            const table = fig.querySelector(':scope > table');
+            const figStyle   = fig.getAttribute('style')   || '';
+            const tableStyle = (table && table.getAttribute('style')) || '';
+            const combined   = figStyle + ' ; ' + tableStyle;
+
+            const isCenter =
+                /margin\s*:\s*0?\s*auto\b/i.test(combined) ||
+                /margin\s*:\s*auto\b/i.test(combined) ||
+                (/margin-left\s*:\s*auto/i.test(combined) &&
+                 /margin-right\s*:\s*auto/i.test(combined));
+            const isRight = !isCenter && /float\s*:\s*right/i.test(combined);
+            // isLeft 는 기본값(아래)에서 처리
+
+            // figure 에 정렬 강제 적용 (float 차단 + margin 으로 표현)
+            fig.style.setProperty('float', 'none', 'important');
+            fig.style.setProperty('clear', 'both', 'important');
+            // ql-indent-N / ck-indent / margin-left:Npx 같은 CKEditor IndentBlock 흔적이
+            // 있으면 그 들여쓰기 양을 보존, 없으면 좌측 정렬 시 기본 1em 들여쓰기를 부여.
+            const indentMatch = combined.match(/margin-left\s*:\s*([\d.]+)(?:px|em|rem|pt)/i);
+            const userIndent  = indentMatch && indentMatch[1] !== '0'
+                ? indentMatch[0].split(':')[1].trim()  // 사용자 지정 값 그대로
+                : null;
+            const defaultLeftIndent = '1em';   // 좌측 정렬 시 기본 들여쓰기
+
+            if (isCenter) {
+                fig.style.setProperty('margin-left',  'auto', 'important');
+                fig.style.setProperty('margin-right', 'auto', 'important');
+            } else if (isRight) {
+                fig.style.setProperty('margin-left',  'auto', 'important');
+                fig.style.setProperty('margin-right', '0',    'important');
+            } else {
+                // 좌측 정렬(기본) — 가벼운 들여쓰기 적용. 사용자가 IndentBlock 으로 더 늘릴 수도 있음.
+                fig.style.setProperty('margin-left',  userIndent || defaultLeftIndent, 'important');
+                fig.style.setProperty('margin-right', 'auto', 'important');
+            }
+        });
+    }
+
+    function initBodyEditor(initialHtml) {
+        const el = document.getElementById('bodyContentEditor');
+        if (!el) {
+            console.error('[Editor] #bodyContentEditor 요소를 찾을 수 없습니다.');
+            return;
+        }
+        // CKEditor 5 의 ClassicEditor 클래스 위치 — Classic build / Super-build 둘 다 대응.
+        //   Classic build : window.ClassicEditor
+        //   Super-build   : window.CKEDITOR.ClassicEditor
+        const Editor = window.ClassicEditor ||
+                       (window.CKEDITOR && window.CKEDITOR.ClassicEditor) ||
+                       null;
+        if (!Editor) {
+            console.error('[Editor] CKEditor 5 라이브러리가 로드되지 않았습니다. ' +
+                '/vendor/ckeditor/ckeditor.js 응답을 확인하세요. ' +
+                '(super-build 인 경우 window.CKEDITOR.ClassicEditor 가 있어야 합니다)');
+            el.innerHTML = '<div style="padding:20px;border:1px dashed #e74c3c;color:#c0392b;font-size:13px;border-radius:6px;">' +
+                '본문 에디터를 불러올 수 없습니다. 페이지를 새로고침하거나 관리자에게 문의하세요.<br>' +
+                '<small>(브라우저 콘솔 [Editor] 로그를 확인하세요)</small></div>';
+            return;
+        }
+
+        // CKEditor 5 super-build toolbar 구성.
+        //   - 본문 내 이미지 삽입·미디어(mediaEmbed)는 정책상 비활성 (첨부파일 기능 사용)
+        //   - 표 안에 커서를 두면 contextual table toolbar 가 자동으로 떠서
+        //     행·열 추가·삭제, 셀 병합·해제, 표/셀 속성 변경이 모두 가능.
+        //
+        // [화이트리스트 방식] super-build 에는 협업·외부서비스·프리미엄 등 수많은 플러그인이
+        //   이미 컴파일되어 있고, 그 중 다수는 자동 초기화 단계에서 channelId / license key /
+        //   외부 서버 호출을 요구해 init 자체를 실패시킨다. removePlugins 로 하나씩 빼는 대신
+        //   "우리가 사용할 plugin 만 plugins 옵션에 명시" 해 그 외 모든 plugin 을 자동 비활성.
+        const WANTED_PLUGINS = new Set([
+            // 코어
+            'Essentials', 'Paragraph', 'Heading',
+            // 텍스트 서식
+            'Bold', 'Italic', 'Underline', 'Strikethrough',
+            'FontColor', 'FontBackgroundColor',
+            // 정렬·들여쓰기
+            'Alignment', 'Indent', 'IndentBlock',
+            // 리스트
+            'List', 'ListProperties', 'TodoList',
+            // 블록 요소
+            'BlockQuote', 'Code', 'CodeBlock', 'HorizontalLine',
+            // 링크
+            'Link', 'AutoLink',
+            // 표 (셀 병합 포함)
+            'Table', 'TableToolbar',
+            'TableProperties', 'TableCellProperties',
+            'TableCaption', 'TableColumnResize', 'TableSelection',
+            // 편집 보조
+            'RemoveFormat', 'FindAndReplace',
+            'PasteFromOffice', 'TextTransformation',
+            // 클립보드 (Essentials 의존성이지만 일부 빌드에서 별도)
+            'Clipboard'
+        ]);
+        const builtinPlugins = Editor.builtinPlugins || [];
+        const plugins = builtinPlugins.filter(P => P && WANTED_PLUGINS.has(P.pluginName));
+        if (!plugins.length) {
+            console.warn('[Editor] builtinPlugins 가 비어있어 화이트리스트 적용 실패. 빌드 종류 확인 필요.');
+        }
+
+        Editor.create(el, {
+            licenseKey: 'GPL',
+            language: 'ko',
+            placeholder: '내용을 입력하세요.',
+            plugins: plugins.length ? plugins : undefined,
+            toolbar: {
+                items: [
+                    'heading', '|',
+                    'bold', 'italic', 'underline', 'strikethrough', '|',
+                    'fontColor', 'fontBackgroundColor', '|',
+                    'bulletedList', 'numberedList', 'todoList', '|',
+                    'outdent', 'indent', '|',
+                    'alignment', '|',
+                    'blockQuote', 'code', 'codeBlock', 'link', 'horizontalLine', '|',
+                    'insertTable', '|',
+                    'undo', 'redo', '|',
+                    'removeFormat', 'findAndReplace'
+                ],
+                shouldNotGroupWhenFull: true
+            },
+            // 표 안에서 자동으로 표시되는 contextual toolbar (행·열·셀 병합 등)
+            table: {
+                contentToolbar: [
+                    'tableColumn',
+                    'tableRow',
+                    'mergeTableCells',
+                    'tableProperties',
+                    'tableCellProperties'
+                ]
+            }
+        }).then(editor => {
+            bodyEditor = editor;
+            // legacy plain text 호환: HTML 이 아니면 escape 후 \n→<br>
+            if (initialHtml) {
+                if (looksLikeHtml(initialHtml)) {
+                    editor.setData(initialHtml);
+                } else {
+                    editor.setData(escapeHtml(initialHtml).replace(/\n/g, '<br>'));
+                }
+            }
+            // 본문 변경 시 숨겨진 textarea 동기화 (기존 검증 로직 호환)
+            //                + 표 정렬 후처리 (CKEditor 의 inline 정렬을 figure 에 강제 매핑)
+            editor.model.document.on('change:data', () => {
+                const ta = document.getElementById('bodyContent');
+                if (ta) ta.value = editor.getData();
+                applyTableAlignment(editor.ui.view.editable.element);
+            });
+            // 초기 마운트 직후에도 한 번 실행 (기존 문서를 열었을 때)
+            setTimeout(() => applyTableAlignment(editor.ui.view.editable.element), 0);
+            // toolbar sticky 는 CKEditor 자체 ck-sticky-panel 이 자동 처리한다.
+            // 별도 JS 호출 불필요.
+        }).catch(err => {
+            console.error('[Editor] CKEditor 초기화 실패:', err);
+            el.innerHTML = '<div style="padding:20px;border:1px dashed #e74c3c;color:#c0392b;font-size:13px;border-radius:6px;">' +
+                '본문 에디터 초기화 중 오류가 발생했습니다.<br><small>' + escapeHtml(err.message || err) + '</small></div>';
+        });
+    }
+    function getBodyEditorHTML() {
+        if (bodyEditor) {
+            const html = bodyEditor.getData();   // CKEditor 5: 빈 에디터는 '' 반환
+            return html || '';
+        }
+        const ta = document.getElementById('bodyContent');
+        return ta ? ta.value : '';
+    }
+    // 빈 본문(태그만 있고 텍스트 없는 경우)을 차단하기 위한 텍스트 길이
+    function getBodyEditorPlainLength() {
+        if (!bodyEditor) {
+            const ta = document.getElementById('bodyContent');
+            return ta ? ta.value.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim().length : 0;
+        }
+        // CKEditor 5 는 getData()가 빈 본문일 때 ''를 반환하므로 그대로 활용 가능.
+        // 안전을 위해 태그/공백 제거 후 길이 측정.
+        const html = bodyEditor.getData() || '';
+        return html.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim().length;
+    }
+
     try { initData = JSON.parse(document.getElementById('initData').textContent); } catch(e) {}
 
     window.onload = function() {
@@ -807,17 +1167,21 @@
         });
 
         if (mode === "WRITE") {
-          if (initData.docNum && initData.status) { 
+          if (initData.docNum && initData.status) {
             window.initViewMode(initData);
             enableEditMode();
-          } else { 
+          } else {
             window.addRow();
             document.getElementById('u-info-line').innerText = `${myPos} : ${myName} (${myPhone})`;
             document.getElementById('u-pos-sign').innerText = myPos;
             enableEditMode();
+            // [에디터] 신규 작성: 빈 에디터 마운트
+            initBodyEditor('');
           }
           setTimeout(() => document.getElementById('subject').focus(), 600);
         } else if (mode === "VIEW") {
+          // [에디터] VIEW 모드: 본문 영역을 읽기 전용 HTML 뷰로 전환
+          document.body.classList.add('view-mode');
           window.initViewMode(initData);
           renderViewButtons();
         }
@@ -859,14 +1223,18 @@
         document.getElementById('form-buttons').innerHTML = html;
     }
 
-    window.submitForm = function(status) { 
+    window.submitForm = function(status) {
         const subj = document.getElementById('subject');
+        // [에디터] 본문은 Toast UI Editor에서 HTML로 추출 + 숨겨진 textarea에 동기화.
+        const bodyHtml = getBodyEditorHTML();
+        const bodyTextLen = getBodyEditorPlainLength();
         const bodyC = document.getElementById('bodyContent');
-        
+        if (bodyC) bodyC.value = bodyHtml;
+
         // 제출(신청)일 때만 필수 입력 검증, 임시저장은 빈 값 허용
         if (status === '제출완료') {
           if (!subj.value.trim()) return Swal.fire({ icon: 'warning', title: '입력 누락', text: '제목을 입력해주세요.' }).then(() => { setTimeout(() => subj.focus(), 300); });
-          if (!bodyC.value.trim()) return Swal.fire({ icon: 'warning', title: '입력 누락', text: '지출 목적 및 상세 내용을 입력해주세요.' }).then(() => { setTimeout(() => bodyC.focus(), 300); });
+          if (bodyTextLen === 0) return Swal.fire({ icon: 'warning', title: '입력 누락', text: '내용을 입력해주세요.' }).then(() => { if (bodyEditor) bodyEditor.focus(); });
         }
 
         const rows = document.getElementsByClassName('item-row');
@@ -1185,7 +1553,20 @@
     }
 
     document.getElementById('subject').value = d.subject || "";
-    document.getElementById('bodyContent').value = d.bodyContent || "";
+    // [에디터] 본문 분기:
+    //   WRITE 모드 → Toast UI Editor 마운트하며 초기값 주입
+    //   VIEW  모드 → 읽기 전용 view div에 sanitize 된 HTML 렌더 (legacy plain text 호환)
+    {
+        const bodyVal = d.bodyContent || "";
+        // 숨겨진 textarea에도 값 보존 (검증 등 레거시 로직 호환)
+        document.getElementById('bodyContent').value = bodyVal;
+        if (mode === 'WRITE') {
+            // 에디터가 아직 마운트 안 됐을 때만 (신규 작성은 위에서 빈 값으로 마운트됨)
+            if (!bodyEditor) initBodyEditor(bodyVal);
+        } else {
+            renderBodyToView(bodyVal, document.getElementById('bodyContentView'));
+        }
+    }
     if(d.executionDate) document.getElementById('execDate').value = d.executionDate;
     if(d.reqDate) document.getElementById('reqDate').value = d.reqDate;
     if(d.payDate) document.getElementById('payDate').value = d.payDate;
@@ -1273,8 +1654,8 @@
       }
       setTimeout(() => { document.querySelectorAll('.item-table textarea').forEach(el => autoResize(el)); }, 100);
       window.updateGrandTotal();
-	    // [추가] 상세 내용 높이 자동 조절 초기화
-      setTimeout(() => autoResize(document.getElementById('bodyContent')), 100);
+      // [에디터] 본문 textarea는 숨겨졌으므로 autoResize 불필요.
+      //         Toast UI Editor가 자체적으로 높이를 관리한다.
     };
 
     // [수정] 서명 이미지 렌더링 함수 (레거시 데이터 호환성 강화)
@@ -1292,8 +1673,11 @@
         }
     }
 
-    window.printDoc = async function() { 
-        document.getElementById('print-body-content-view').innerText = document.getElementById('bodyContent').value;
+    window.printDoc = async function() {
+        // [에디터] 인쇄용 본문 div에 HTML 렌더 (legacy plain text 호환).
+        //          서버에서 sanitize 된 HTML이므로 innerHTML 사용이 안전하다.
+        const bodySrc = (bodyEditor ? bodyEditor.getHTML() : (initData.bodyContent || document.getElementById('bodyContent').value || ''));
+        renderBodyToView(bodySrc, document.getElementById('print-body-content-view'));
         document.querySelectorAll('.item-table textarea').forEach(el => {
              el.style.height = 'auto';
              el.style.height = (el.scrollHeight) + 'px';
