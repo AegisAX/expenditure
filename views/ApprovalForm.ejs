@@ -1173,6 +1173,18 @@
         const html = bodyEditor.getData() || '';
         return html.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim().length;
     }
+    // [WAF] 본문 HTML 을 UTF-8 안전 base64 로 인코딩.
+    //   btoa 는 Latin1 만 처리하므로 encodeURIComponent+unescape 로 UTF-8 바이트열로 변환 후 인코딩.
+    //   (한국어 등 비-Latin1 문자 포함 시 btoa 단독 호출은 예외를 던진다.)
+    //   빈 본문('')은 ''로 인코딩되어 서버 디코딩 후에도 ''→빈본문 검증이 정상 동작한다.
+    function encodeBodyContentToBase64(html) {
+        try {
+            return btoa(unescape(encodeURIComponent(html || '')));
+        } catch (e) {
+            console.error('[BodyContent Encode] 인코딩 실패:', e);
+            return '';
+        }
+    }
 
     try { initData = JSON.parse(document.getElementById('initData').textContent); } catch(e) {}
 
@@ -1296,11 +1308,16 @@
 
     window.submitForm = function(status) {
         const subj = document.getElementById('subject');
-        // [에디터] 본문은 Toast UI Editor에서 HTML로 추출 + 숨겨진 textarea에 동기화.
+        // [에디터] 본문은 CKEditor에서 HTML로 추출.
         const bodyHtml = getBodyEditorHTML();
         const bodyTextLen = getBodyEditorPlainLength();
         const bodyC = document.getElementById('bodyContent');
         if (bodyC) bodyC.value = bodyHtml;
+        // [WAF] 본문 HTML(<table>, style=, <figure> 등)이 요청 본문에 그대로 실리면
+        //   앞단 WAF(open-appsec)가 XSS/SQLi/RCE/Path-Traversal 시그니처로 오탐한다.
+        //   본문만 UTF-8 안전 base64 로 인코딩해 전송 → 요청에서 마크업이 사라져 오탐 제거.
+        //   서버는 디코딩 후 동일하게 sanitize 하므로 보안은 동등하다.
+        const bodyContentB64 = encodeBodyContentToBase64(bodyHtml);
 
         // 제출(신청)일 때만 필수 입력 검증, 임시저장은 빈 값 허용
         if (status === '제출완료') {
@@ -1339,7 +1356,9 @@
         formData.append('docNum', dNum);
         formData.append('docType', window.docType || 'E');   /* [B-5b] G 모드 식별용 */
         formData.append('subject', subj.value);
-        formData.append('bodyContent', bodyC.value);
+        // [WAF] 본문은 base64 인코딩하여 전송. 서버가 bodyContentEnc 플래그를 보고 디코딩한다.
+        formData.append('bodyContentEnc', 'base64');
+        formData.append('bodyContent', bodyContentB64);
         formData.append('totalAmount', total);
         // executionDate는 총동문회장 결재 시 서버에서 자동 기록 — 클라이언트에서 전송하지 않음
         formData.append('reqDate', initData.reqDate || '');

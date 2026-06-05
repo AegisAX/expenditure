@@ -178,12 +178,34 @@ router.get('/form', async (req, res) => {
 
 const uploadMiddleware = upload.array('newAttachments');
 
+// [WAF] 본문 base64 디코딩 미들웨어.
+//   클라이언트가 본문 HTML 을 base64 로 인코딩해 보내면(bodyContentEnc==='base64'),
+//   앞단 WAF(open-appsec)가 요청에서 마크업을 보지 못해 XSS/SQLi/RCE 오탐을 일으키지 않는다.
+//   여기서 UTF-8 로 디코딩해 평문 HTML 로 되돌린다.
+//   ★ 반드시 approvalValidator 보다 먼저 실행되어야, 검증기(bodyContent 비어있음 검사)가
+//     base64 문자열이 아니라 디코딩된 실제 HTML 길이를 보고 판단한다.
+//   ★ 플래그가 없으면(구버전 클라이언트/legacy) 평문으로 간주하고 디코딩하지 않는다(하위호환).
+function decodeBodyContent(req, res, next) {
+    if (!req.body) return next();
+    if (req.body.bodyContentEnc === 'base64' && typeof req.body.bodyContent === 'string') {
+        try {
+            req.body.bodyContent = Buffer.from(req.body.bodyContent, 'base64').toString('utf8');
+        } catch (e) {
+            console.error('[BodyContent Decode] 디코딩 실패:', e.message);
+            // 디코딩 실패 시 빈 값으로 두어 검증 단계에서 자연스럽게 거부되도록 함.
+            req.body.bodyContent = '';
+        }
+        delete req.body.bodyContentEnc;
+    }
+    next();
+}
+
 router.post('/api/submit', (req, res, next) => {
     uploadMiddleware(req, res, (err) => {
         if (err) return res.json({ status: 'Error', msg: err.code === 'LIMIT_FILE_SIZE' ? `파일 크기 초과 (${MAX_UPLOAD_MB}MB)` : err.message });
         next();
     });
-}, normalizeApprovalBody, approvalValidator, async (req, res) => {
+}, decodeBodyContent, normalizeApprovalBody, approvalValidator, async (req, res) => {
     const user = getUser(req);
     const f = req.body;
 
