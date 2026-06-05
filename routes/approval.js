@@ -149,6 +149,13 @@ router.get('/form', async (req, res) => {
                 return res.send(renderAlertHTML(`현재 [${doc.locked_by_name}]님이 ${actionMsg}`));
             }
         }
+
+        // [감사로그] 문서 열람 기록. 접근 차단을 모두 통과해 실제 화면에 진입하는 시점에 기록.
+        //           본인 작성중 회수(상기 분기) / 락 충돌 / 존재하지 않음 케이스는 열람으로 간주하지 않음.
+        //           단순 신규 작성 진입(docNum 없음)은 위 db.get 자체가 실행되지 않으므로 자동 제외.
+        const subjectForLog = (doc.subject && doc.subject.trim()) ? doc.subject : '(제목 없음)';
+        logAction(req, 'DOC_VIEW', `문서 열람: ${docNum} (제목: ${subjectForLog}, 상태: ${doc.status})`);
+
         try { doc.items = JSON.parse(doc.items || "[]"); } catch(e) { doc.items = []; }
         doc.attachmentIds = doc.file_paths;
         doc.signatures = { applicant: doc.appSig, secretary: doc.secSig, president: doc.presSig };
@@ -249,6 +256,17 @@ router.post('/api/submit', (req, res, next) => {
             else if (initialStatus === '결재중') msg = "제출 및 사무총장 자동 승인 완료 (총동문회장 결재 단계).";
             else if (initialStatus === '최종결재') msg = "제출 및 최종 승인 완료 (재무국장 지급 단계).";
             else if (initialStatus === '결재완료') msg = "제출 및 결재 완료 (총동문회장 자동 결재).";
+
+            // [감사로그] 문서 제출 기록. 임시저장('작성중')은 제외.
+            //           자결재 케이스(사무총장/총동문회장 자가기안)도 '제출' 행위 자체는 동일하게 기록한다.
+            //           최종 도달 상태(initialStatus)와 docType, 제목을 함께 남겨 추적성 확보.
+            if (initialStatus !== '작성중') {
+                const meta = getDocMeta(docType);
+                const subjectForLog = (f.subject && f.subject.trim()) ? f.subject : '(제목 없음)';
+                logAction(req, 'DOC_SUBMIT',
+                    `문서 제출(${meta.label}): ${finalDocNum} (제목: ${subjectForLog}, 도달상태: ${initialStatus})`);
+            }
+
             res.json({ msg });
             try {
                 const baseUrl = await getSiteUrl();
@@ -282,11 +300,13 @@ router.post('/api/submit', (req, res, next) => {
                 db.run(
                     // [수정] 회수·반려 후 재제출 시 기안자 정보 및 이전 결재자 흔적 초기화
                     //        이전 결재자 서명(secSig/presSig 등)이 DB에 잔존해 감사 트레일이 오염되는 문제를 해결
+                    // [STAGE_SKIP] 재제출 시 건너뛰기 흔적도 함께 초기화 (감사 트레일 무결성)
                     "UPDATE approvals SET \
                         subject=?, bodyContent=?, totalAmount=?, reqDate=?, items=?, status=?, file_paths=?, \
                         appPos=?, appName=?, appPhone=?, appSig=?, \
                         secName=NULL, secSig=NULL, secDate=NULL, \
                         presName=NULL, presSig=NULL, executionDate=NULL, \
+                        secSkippedBy=NULL, secSkippedAt=NULL, secSkippedReason=NULL, \
                         payDate=NULL \
                      WHERE docNum=?",
                     [f.subject, f.bodyContent, f.totalAmount, finalReqDate, itemsStr, initialStatus, filePathsStr,
@@ -539,7 +559,8 @@ router.post('/api/lock/release', (req, res) => {
 router.post('/api/recall', (req, res) => {
     const user = getUser(req);
     const { docNum } = req.body;
-    db.run(`UPDATE approvals SET status='작성중', secName=NULL, secSig=NULL, secDate=NULL, presName=NULL, presSig=NULL, executionDate=NULL, locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=? AND applicantEmail=? AND status IN ('제출완료', '결재중')`,
+    // [STAGE_SKIP] 회수 시 건너뛰기 흔적도 함께 초기화 (감사 트레일 무결성)
+    db.run(`UPDATE approvals SET status='작성중', secName=NULL, secSig=NULL, secDate=NULL, presName=NULL, presSig=NULL, executionDate=NULL, secSkippedBy=NULL, secSkippedAt=NULL, secSkippedReason=NULL, locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=? AND applicantEmail=? AND status IN ('제출완료', '결재중')`,
         [docNum, user.email], function(err) {
             if (err) return res.json({ status: 'Error', msg: err.message });
             if (this.changes === 0) return res.json({ status: 'Error', msg: '회수할 수 없는 상태입니다.' });
@@ -579,9 +600,13 @@ router.get('/api/download/*', (req, res) => {
             }
             try {
                 await fs.promises.access(safePath);
-                // 증빙파일 다운로드 감사 로그
-                const docStatus = row ? row.status : 'UNKNOWN';
-                logAction(req, 'FILE_DOWNLOAD', `증빙파일 다운로드: ${relativePath} (상태: ${docStatus})`);
+                // [수정] 명시적 다운로드(?download=1) 인 경우에만 감사 로그 기록.
+                //        인라인 렌더링(<img>, PDF.js getDocument 등)에 의한 자동 호출은
+                //        '열람' 이지 '다운로드'가 아니므로 로그에서 제외한다.
+                if (req.query.download === '1') {
+                    const docStatus = row ? row.status : 'UNKNOWN';
+                    logAction(req, 'FILE_DOWNLOAD', `증빙파일 다운로드: ${relativePath} (상태: ${docStatus})`);
+                }
                 res.download(safePath);
             } catch { res.status(404).send('파일 없음'); }
         }
@@ -640,5 +665,40 @@ router.post('/api/file/delete', async (req, res) => {
         }
     );
 });
+
+// [감사로그] 첨부파일 미리보기 / 인쇄 다이얼로그 열림·닫힘 기록.
+//  - 클라이언트의 명시적 액션 시점을 서버 라우트에서 잡을 수 없는 케이스를 보완.
+//  - 액션명은 서버에서 하드코딩되어 클라이언트가 임의의 액션을 만들지 못하도록 함.
+//  - docNum 은 SELECT 로 존재 확인 후 제목/상태를 로그에 함께 기록.
+
+function logDocAction(req, res, action, extraDetailFn) {
+    const { docNum } = req.body || {};
+    if (!docNum) return res.json({ status: 'Error', msg: 'docNum 누락' });
+
+    db.get("SELECT subject, status FROM approvals WHERE docNum = ?", [docNum], (err, doc) => {
+        if (err)  return res.json({ status: 'Error', msg: 'DB 조회 실패' });
+        if (!doc) return res.json({ status: 'Error', msg: '문서를 찾을 수 없습니다.' });
+
+        const subjectForLog = (doc.subject && doc.subject.trim()) ? doc.subject : '(제목 없음)';
+        const extra = extraDetailFn ? extraDetailFn(req.body) : '';
+        const detail = `${docNum} (제목: ${subjectForLog}, 상태: ${doc.status})${extra}`;
+        logAction(req, action, detail);
+        res.json({ status: 'Success' });
+    });
+}
+
+router.post('/api/log/preview', (req, res) => {
+    // 미리보기 대상 파일명도 함께 기록 (서버 디렉토리 경로는 노출하지 않음)
+    logDocAction(req, res, 'FILE_PREVIEW', (body) => {
+        const fileId = (body && body.fileId) ? String(body.fileId) : '';
+        const displayName = fileId.split('/').pop();
+        return displayName ? ` - 미리보기: ${displayName}` : '';
+    });
+});
+
+router.post('/api/log/print-open',  (req, res) => logDocAction(req, res, 'PRINT_OPEN'));
+// PRINT_CLOSE: 브라우저 afterprint 이벤트 시점.
+// 다이얼로그가 닫힌 사실만 기록 — 실제 저장/인쇄와 취소를 구분하지 않음 (브라우저 한계).
+router.post('/api/log/print-close', (req, res) => logDocAction(req, res, 'PRINT_CLOSE'));
 
 module.exports = router;

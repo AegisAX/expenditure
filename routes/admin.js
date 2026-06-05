@@ -4,11 +4,11 @@ const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const db = require('../database');
-const { logAction, getSettings, saveSettings } = require('../helpers/db');
+const { logAction, getSettings, saveSettings, getUserByPos, getSiteUrl } = require('../helpers/db');
 const { uploadDir, saveFile } = require('../helpers/file');
 const { requireAdmin } = require('../middleware/auth');
 const { validatePassword } = require('../middleware/validators');
-const { reloadTransporter, sendEmail, getCurrentMailSettings } = require('../helpers/email');
+const { reloadTransporter, sendEmail, getCurrentMailSettings, makeEmailHtml } = require('../helpers/email');
 
 router.get('/admin', requireAdmin, (req, res) => res.render('admin', { user: req.session.user }));
 
@@ -310,7 +310,21 @@ router.get('/api/admin/list', requireAdmin, (req, res) => {
     if (keyword) { whereClause += " AND (docNum LIKE ? OR subject LIKE ? OR appName LIKE ?)"; const k = `%${keyword}%`; params.push(k, k, k); }
     db.get(`SELECT COUNT(*) as count FROM approvals ${whereClause}`, params, (err, countRow) => {
         if (err) return res.json({ docs: [], total: 0 });
-        db.all(`SELECT * FROM approvals ${whereClause} ORDER BY docNum DESC LIMIT ? OFFSET ?`, [...params, limit, offset], (err, rows) => {
+        // [관리자 정렬] 일반 목록(/list)의 정렬 규칙을 그대로 적용 (spotlight 만 제외).
+        //   - 1단계: 진행 그룹('작성중'/'반려'/'제출완료'/'결재중')을 위로
+        //   - 2단계: 같은 그룹 내에서는 docNum 내림차순
+        //   '최종결재'는 재무국장 결재 대기 단계지만 일반 목록 기준에서 종결 그룹으로 묶임.
+        //   TEMP-* 는 docNum 사전식 비교에서 사무국-* 보다 작아 자연스럽게 진행 그룹 안에서 위로 올라간다.
+        const orderClause = `
+            ORDER BY
+                CASE
+                    WHEN status IN ('작성중', '반려', '제출완료', '결재중')
+                        THEN 0
+                    ELSE 1
+                END ASC,
+                docNum DESC
+        `;
+        db.all(`SELECT * FROM approvals ${whereClause} ${orderClause} LIMIT ? OFFSET ?`, [...params, limit, offset], (err, rows) => {
             if (err) return res.json({ docs: [], total: 0 });
             // [B-3] 응답에 docType 추가 — 관리자 화면에서 유형 배지 표시용
             res.json({
@@ -325,6 +339,156 @@ router.get('/api/admin/list', requireAdmin, (req, res) => {
                 page,
                 totalPages: Math.ceil(countRow.count / limit)
             });
+        });
+    });
+});
+
+// [STAGE_SKIP] 관리자 문서 상세 조회.
+// 관리자 화면(문서 관리 섹션)에서 행 클릭 시 모달 표시용.
+// 결재 라인의 현재 상태와 건너뛰기 가능 여부를 함께 반환한다.
+router.get('/api/admin/doc/:docNum', requireAdmin, (req, res) => {
+    const { docNum } = req.params;
+    db.get("SELECT * FROM approvals WHERE docNum = ?", [docNum], (err, doc) => {
+        if (err)  return res.status(500).json({ status: 'Error', msg: 'DB 조회 실패: ' + err.message });
+        if (!doc) return res.status(404).json({ status: 'Error', msg: '문서를 찾을 수 없습니다.' });
+
+        // 사무총장 건너뛰기 가능 여부 판정 (제출완료 상태 + 아직 안 건너뛴 경우)
+        const canSkipSecretary = (doc.status === '제출완료') && !doc.secSkippedBy;
+
+        res.json({
+            status: 'Success',
+            doc: {
+                docNum:           doc.docNum,
+                docType:          doc.docType || 'E',
+                subject:          doc.subject,
+                status:           doc.status,
+                applicantEmail:   doc.applicantEmail,
+                appName:          doc.appName,
+                appPos:           doc.appPos,
+                reqDate:          doc.reqDate,
+                totalAmount:      doc.totalAmount,
+                secName:          doc.secName,
+                secDate:          doc.secDate,
+                secSkippedBy:     doc.secSkippedBy,
+                secSkippedAt:     doc.secSkippedAt,
+                secSkippedReason: doc.secSkippedReason,
+                presName:         doc.presName,
+                executionDate:    doc.executionDate,
+                payDate:          doc.payDate
+            },
+            canSkipSecretary
+        });
+    });
+});
+
+// [STAGE_SKIP] 사무총장 결재 단계 건너뛰기.
+// - 권한: Admin 전용
+// - 허용 상태: '제출완료' (사무총장 결재 전 단계) 만
+// - 사유(reason) 필수 입력
+// - 처리: 상태를 '결재중'으로 전이, secSkippedBy/At/Reason 기록, 총동문회장에게 메일
+// - 사무총장 결재칸은 화면에서 사선(/)으로 표시 (secSig는 NULL 유지)
+router.post('/api/admin/skip-stage', requireAdmin, async (req, res) => {
+    const admin = req.session.user;
+    const { docNum, reason } = req.body || {};
+
+    if (!docNum) {
+        return res.status(400).json({ status: 'Error', msg: '문서 번호가 누락되었습니다.' });
+    }
+    const trimmedReason = (reason || '').trim();
+    if (!trimmedReason) {
+        return res.status(400).json({ status: 'Error', msg: '건너뛰기 사유는 필수 입력입니다.' });
+    }
+    if (trimmedReason.length > 500) {
+        return res.status(400).json({ status: 'Error', msg: '건너뛰기 사유는 500자 이내로 입력해 주세요.' });
+    }
+
+    // 문서 조회 및 상태 검증
+    db.get("SELECT * FROM approvals WHERE docNum = ?", [docNum], async (err, doc) => {
+        if (err)  return res.status(500).json({ status: 'Error', msg: 'DB 조회 실패: ' + err.message });
+        if (!doc) return res.status(404).json({ status: 'Error', msg: '문서를 찾을 수 없습니다.' });
+
+        if (doc.status !== '제출완료') {
+            return res.status(400).json({
+                status: 'Error',
+                msg: `현재 상태(${doc.status})에서는 사무총장 건너뛰기를 할 수 없습니다.\n'제출완료' 상태의 문서만 가능합니다.`
+            });
+        }
+        if (doc.secSkippedBy) {
+            return res.status(400).json({
+                status: 'Error',
+                msg: '이미 사무총장 결재 단계가 건너뛰기 처리된 문서입니다.'
+            });
+        }
+
+        // 락 점유 확인 — 다른 사용자가 편집/결재 중이면 거부
+        if (doc.locked_at && doc.locked_by_email && doc.locked_by_email !== admin.email) {
+            const diffMin = (Date.now() - new Date(doc.locked_at).getTime()) / 1000 / 60;
+            if (diffMin < 3) {
+                return res.status(409).json({
+                    status: 'Error',
+                    msg: `현재 [${doc.locked_by_name}]님이 문서를 처리 중입니다.\n잠시 후 다시 시도해 주세요.`
+                });
+            }
+        }
+
+        // 상태 전이 + 건너뛰기 기록
+        // secSig 는 NULL 유지 (실제 사무총장 결재가 없었음을 명확히)
+        // 화면 표시는 secSkippedBy 가 NULL 이 아닌 것을 기준으로 사선(/) 표시
+        const nowIso = new Date().toISOString();
+        const sql = `UPDATE approvals SET
+                        status = '결재중',
+                        secSkippedBy = ?,
+                        secSkippedAt = ?,
+                        secSkippedReason = ?,
+                        locked_by_name = NULL,
+                        locked_by_email = NULL,
+                        locked_at = NULL
+                     WHERE docNum = ? AND status = '제출완료' AND secSkippedBy IS NULL`;
+        db.run(sql, [admin.email, nowIso, trimmedReason, docNum], async function(updateErr) {
+            if (updateErr) {
+                return res.status(500).json({ status: 'Error', msg: 'DB 업데이트 실패: ' + updateErr.message });
+            }
+            if (this.changes === 0) {
+                // 동시성 충돌 (다른 관리자가 먼저 처리했거나 상태가 변경됨)
+                return res.status(409).json({
+                    status: 'Error',
+                    msg: '문서 상태가 변경되어 처리할 수 없습니다. 화면을 새로고침 후 다시 시도해 주세요.'
+                });
+            }
+
+            logAction(
+                req,
+                'STAGE_SKIP',
+                `사무총장 결재 단계 건너뛰기: ${docNum} - 사유: ${trimmedReason}`
+            );
+
+            res.json({
+                status: 'Success',
+                msg: '사무총장 결재 단계를 건너뛰었습니다. 총동문회장에게 결재 요청 메일이 발송됩니다.'
+            });
+
+            // 총동문회장에게 결재 요청 메일 (fire-and-forget)
+            try {
+                const meta = (doc.docType === 'G')
+                    ? { label: '일반 기안' }
+                    : { label: '지출결의서' };
+                const baseUrl = await getSiteUrl();
+                const nextPerson = await getUserByPos('총동문회장');
+                if (nextPerson && nextPerson.email) {
+                    const appInfo = `${doc.appPos || ''} ${doc.appName || ''}`.trim();
+                    // [STAGE_SKIP] 메일 본문에 건너뛰기 사유를 그대로 노출.
+                    //              제목과 본문 모두 "사무총장 단계 생략" 표식을 유지하되
+                    //              구체적인 사유는 statusMsg 로 전달한다.
+                    const statusMsg = `결재 요청 (사무총장 결재 생략 사유: ${trimmedReason})`;
+                    await sendEmail(
+                        nextPerson.email,
+                        `[결재요청] ${meta.label} - ${doc.subject} (사무총장 결재 생략)`,
+                        makeEmailHtml(docNum, doc.subject, appInfo, statusMsg, baseUrl)
+                    );
+                }
+            } catch (e) {
+                console.error('[Mail dispatch error]', e.message);
+            }
         });
     });
 });
