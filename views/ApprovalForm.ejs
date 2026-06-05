@@ -97,6 +97,19 @@
       user-select: text;
       -webkit-user-select: text;
     }
+    /* [선택] 본문·결재 표·집행내역·인쇄 영역도 사용자가 드래그로 선택해 복사할 수 있어야 한다.
+       PWA 네이티브 느낌의 user-select:none 정책에서 컨텐츠 영역은 명시적으로 예외 처리한다. */
+    #bodyContentView,
+    #print-body-content-view,
+    .ck-content,
+    .content-cell,
+    .processor-content,
+    .item-table,
+    .item-table td,
+    .item-table textarea {
+      user-select: text;
+      -webkit-user-select: text;
+    }
 
     /* [수정] 상단 헤더 디자인.
        이전에 main-title 을 position:sticky 로 화면 상단에 박아 두었지만,
@@ -216,18 +229,25 @@
 	/* [에디터] 숨겨진 textarea — 검증/이전 코드 호환용. 실제 입력은 CKEditor 사용 */
     #bodyContent { display: none !important; }
 
-    /* [에디터] CKEditor 5 컨테이너 */
+    /* [에디터] CKEditor 5 본문 입력란 높이.
+       ClassicEditor.create() 가 #bodyContentEditor 자체를 editable 로 변환하면서
+       .ck-editor__editable / .ck-editor__editable_inline 등 여러 클래스를 부여한다.
+       어느 셀렉터에서든 매칭되도록 여러 패턴을 한꺼번에 강제. */
     #bodyContentEditor {
-        min-height: 220px;
         margin: 0;
+        min-height: 400px;
     }
-    #bodyContentEditor .ck-editor__editable {
+    #bodyContentEditor.ck,
+    #bodyContentEditor.ck-content,
+    #bodyContentEditor.ck-editor__editable,
+    #bodyContentEditor.ck-editor__editable_inline,
+    .ck.ck-editor__main > #bodyContentEditor {
         font-family: -apple-system, BlinkMacSystemFont, "Malgun Gothic", sans-serif;
         font-size: 14px;
         line-height: 1.5;
-        min-height: 200px;
+        min-height: 400px !important;
     }
-    #bodyContentEditor .ck.ck-editor__main > .ck-editor__editable {
+    .ck.ck-editor__main > #bodyContentEditor {
         border-color: #d0d0d0;
     }
     /* [에디터] CKEditor 가 기본으로 <p>/<h*>/<ul>/<ol>/<li> 에 큰 마진(약 1em ~ 1.5em)을 부여해
@@ -646,11 +666,16 @@
   body.mode-G #add-btn-area {
     display: none !important;
   }
-  body.mode-G #bodyContentEditor {
-    min-height: 480px;       /* 집행내역 영역이 비는 만큼 본문 확대 */
+  body.mode-G #bodyContentEditor,
+  body.mode-G #bodyContentEditor.ck,
+  body.mode-G #bodyContentEditor.ck-content,
+  body.mode-G #bodyContentEditor.ck-editor__editable,
+  body.mode-G #bodyContentEditor.ck-editor__editable_inline,
+  body.mode-G .ck.ck-editor__main > #bodyContentEditor {
+    min-height: 600px !important;       /* 집행내역 영역이 비는 만큼 본문 확대 */
   }
   body.mode-G #bodyContentView {
-    min-height: 480px;
+    min-height: 600px;
   }
   </style>
 </head>
@@ -1077,6 +1102,17 @@
             });
             // 초기 마운트 직후에도 한 번 실행 (기존 문서를 열었을 때)
             setTimeout(() => applyTableAlignment(editor.ui.view.editable.element), 0);
+
+            // [본문 입력란 높이 강제] CSS 셀렉터(자식 결합자)는 ClassicEditor 마운트 후의
+            //   editable 클래스 구조와 어긋나 minHeight 가 적용되지 않는 환경이 있어
+            //   editable element 에 inline style 로 직접 적용한다.
+            try {
+                const editable = editor.ui.view.editable.element;
+                const targetMinHeight = (window.docType === 'G') ? '600px' : '400px';
+                editable.style.setProperty('min-height', targetMinHeight, 'important');
+            } catch (e) {
+                console.warn('[Editor] min-height 적용 실패:', e);
+            }
             // toolbar sticky 는 CKEditor 자체 ck-sticky-panel 이 자동 처리한다.
             // 별도 JS 호출 불필요.
         }).catch(err => {
