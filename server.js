@@ -93,7 +93,13 @@ app.use((req, res) => res.redirect('/login'));
 app.use((err, req, res, next) => {
     if (err.code !== 'EBADCSRFTOKEN') return next(err);
     console.error(`[CSRF Error] ${req.ip} - ${req.originalUrl}`);
-    res.status(403).json({ status: 'Error', msg: '보안 토큰이 만료되었거나 유효하지 않습니다.<br>페이지를 새로고침하세요.' });
+    // [CSRF Auto-Recovery] 응답에 code 를 함께 보내 클라이언트의 csrf-guard.js 가
+    //   일반 에러와 구분해 자동 새로고침을 유도할 수 있도록 한다.
+    res.status(403).json({
+        status: 'Error',
+        code: 'CSRF_INVALID',
+        msg: '보안 토큰이 만료되었거나 유효하지 않습니다.<br>페이지를 새로고침하세요.'
+    });
 });
 
 setTimeout(checkAndMigrateDB, 1000);
