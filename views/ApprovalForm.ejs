@@ -1106,10 +1106,33 @@
             // [본문 입력란 높이 강제] CSS 셀렉터(자식 결합자)는 ClassicEditor 마운트 후의
             //   editable 클래스 구조와 어긋나 minHeight 가 적용되지 않는 환경이 있어
             //   editable element 에 inline style 로 직접 적용한다.
+            //
+            //   추가: CKEditor 가 포커스/blur 시점에 자체 inline style 을 재할당하면서
+            //   우리 min-height 가 사라지는 사례가 확인됐다.
+            //   MutationObserver 로 editable 의 style 변경을 감시해 즉시 복원한다.
             try {
                 const editable = editor.ui.view.editable.element;
                 const targetMinHeight = (window.docType === 'G') ? '600px' : '400px';
-                editable.style.setProperty('min-height', targetMinHeight, 'important');
+
+                const enforceMinHeight = () => {
+                    if (editable.style.minHeight !== targetMinHeight ||
+                        editable.style.getPropertyPriority('min-height') !== 'important') {
+                        editable.style.setProperty('min-height', targetMinHeight, 'important');
+                    }
+                };
+                enforceMinHeight();   // 초기 1회
+
+                // CKEditor 가 style 속성을 갈아치워도 즉시 복원
+                const styleObserver = new MutationObserver(enforceMinHeight);
+                styleObserver.observe(editable, {
+                    attributes: true,
+                    attributeFilter: ['style']
+                });
+
+                // 포커스/blur 시점에도 명시적 적용 (MutationObserver 가 놓치는 케이스 대비)
+                if (editor.editing && editor.editing.view && editor.editing.view.document) {
+                    editor.editing.view.document.on('change:isFocused', enforceMinHeight);
+                }
             } catch (e) {
                 console.warn('[Editor] min-height 적용 실패:', e);
             }
