@@ -62,13 +62,12 @@ app.use(cookieParser());
 app.use(session({
     store: new SQLiteStore({ db: 'sessions.db', dir: './db', concurrentDB: true }),
     secret: process.env.SESSION_SECRET || 'secret-key-replace-me',
-    // [수정] csurf 가 GET /login 응답 시 req.session._csrf 에 secret 을 저장하지만,
-    //   resave:false + saveUninitialized:false 조합에서는 SQLite store 가 이를
-    //   영속화하지 않아 다음 POST 요청에서 session._csrf 가 NO 로 잡히고
-    //   CSRF mismatch 가 발생하는 사례가 확인됐다.
-    //   안전을 위해 두 옵션을 모두 활성화 — SQLite store 쓰기 부하는 미미.
-    resave: true,
-    saveUninitialized: true,
+    // [수정] csurf 를 쿠키 기반으로 전환 (위) 후 세션 의존이 사라졌으므로
+    //   세션 옵션을 보수적 기본값으로 복원.
+    //   이전에 두 옵션을 true 로 바꿨더니 SQLite 동시 write race 영향으로
+    //   세션 ID 가 매 요청마다 갱신되며 로그인 정보가 잠시 후 유실되는 사례 확인.
+    resave: false,
+    saveUninitialized: false,
     rolling: true,
     cookie: {
         httpOnly: true,
@@ -83,13 +82,23 @@ app.use(session({
     }
 }));
 
-app.use(csrf());
+// [CSRF] 쿠키 기반 csurf 사용.
+//   기존 세션 기반(default)에서는 GET 응답 시 csurf 가 req.session._csrf 에 secret 을 set 하지만
+//   SQLite session store 와의 race / saveUninitialized 조합 사정으로 secret 이 영속화되지 않아
+//   다음 POST 요청에서 session._csrf?=NO 로 잡히고 CSRF mismatch 가 반복 발생하는 사례가 있었다.
+//   쿠키 기반은 secret 을 별도 httpOnly 쿠키 '_csrf' 에 즉시 저장하므로
+//   세션 의존성·SQLite write race 가 없다.
+app.use(csrf({
+    cookie: {
+        key: '_csrf',
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.HTTPS_ENFORCE === 'true'
+    }
+}));
 app.use((req, res, next) => {
     res.locals.csrfToken = req.csrfToken();
     next();
-    // [주의] 이전에 추가했던 req.session.save 명시 호출은 SQLite store 의 동시 write 와
-    //   충돌해 모든 GET 요청이 hang 되는 사례가 확인되어 제거.
-    //   대신 session 옵션 resave:true + saveUninitialized:true 로 영속화를 보장한다.
 });
 
 app.use('/', authRoutes);
@@ -109,16 +118,18 @@ app.use((req, res) => res.redirect('/login'));
 app.use((err, req, res, next) => {
     if (err.code !== 'EBADCSRFTOKEN') return next(err);
     // [진단] CSRF mismatch 원인 파악용 상세 로그.
-    //   - sessionID 가 매 요청마다 바뀌면 → 쿠키가 유지 안 되는 것 (HTTPS·proxy 환경 문제 의심)
-    //   - clientToken / sessionSecret 둘 다 있는데 mismatch 면 → 토큰 발급/사용 사이클 문제
-    const hdrToken    = req.headers['csrf-token'] || req.headers['x-csrf-token'];
-    const bodyToken   = (req.body && req.body._csrf) ? '(body)' : '';
-    const cookieSid   = req.headers.cookie && req.headers.cookie.includes('connect.sid') ? 'YES' : 'NO';
-    const sessionId   = req.sessionID || '(none)';
-    const sessionHas  = req.session && req.session._csrf ? 'YES' : 'NO';
+    //   쿠키 기반 csurf 사용 — 서버는 '_csrf' 쿠키의 secret 과 클라이언트 헤더 토큰을 검증한다.
+    //   csrf.cookie?=YES 인데 mismatch 면 → 클라이언트가 옛 토큰을 보내거나 쿠키 도메인 불일치
+    //   csrf.cookie?=NO  이면 → 클라이언트가 쿠키를 안 보낸 것 (samesite/secure/proxy 의심)
+    const cookieHeader = req.headers.cookie || '';
+    const hdrToken     = req.headers['csrf-token'] || req.headers['x-csrf-token'];
+    const bodyToken    = (req.body && req.body._csrf) ? '(body)' : '';
+    const cookieSid    = cookieHeader.includes('connect.sid') ? 'YES' : 'NO';
+    const csrfCookie   = cookieHeader.includes('_csrf=') ? 'YES' : 'NO';
+    const sessionId    = req.sessionID || '(none)';
     console.error(
         `[CSRF Error] ${req.ip} - ${req.method} ${req.originalUrl}\n` +
-        `   sessionID=${sessionId}  session._csrf?=${sessionHas}  cookie.connect.sid?=${cookieSid}\n` +
+        `   sessionID=${sessionId}  cookie.connect.sid?=${cookieSid}  cookie._csrf?=${csrfCookie}\n` +
         `   client header token=${hdrToken ? 'present(' + String(hdrToken).slice(0,8) + '...)' : 'MISSING'}  ${bodyToken}\n` +
         `   X-Forwarded-Proto=${req.headers['x-forwarded-proto'] || '(none)'}  Host=${req.headers.host}`
     );
