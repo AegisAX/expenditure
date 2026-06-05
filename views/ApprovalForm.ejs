@@ -1172,7 +1172,9 @@
         
         if (initData.docNum) {
 			// [개선] 작성 중이거나 결재 대기 중인 문서(수정/결재 가능 상태)일 때만 Lock 실행
-			const isMutableStatus = !['최종결재', '지급완료'].includes(initData.status);
+			//   '결재완료'(일반 기안 종결 상태)도 더 이상 수정·결재 불가능한 읽기 전용이므로
+			//   락을 잡지 않는다. 서버의 CLOSED_STATUSES / lock 정책과 일관성 유지.
+			const isMutableStatus = !['최종결재', '지급완료', '결재완료'].includes(initData.status);
     
 			if (isMutableStatus) {
 				const acquireLock = () => {
@@ -1869,15 +1871,24 @@
             // 2. 이미지 파일인 경우
             if (/\.(jpg|jpeg|png|gif|webp)$/i.test(lower)) {
                 const img = document.createElement('img');
-                img.src = url;
                 // [수정] max-height 제거 — flex-start 정렬 + 컨테이너 스크롤로 잘림 방지.
                 //        height 는 자연 비율, max-width 100% 로 가로 폭만 제한.
                 img.style.maxWidth = '100%';
                 img.style.height = 'auto';
                 img.style.display = 'block';
-                img.onload = () => { msg.style.display = 'none'; };
+                // [수정] onerror 핸들러 추가. 이미지 로드 실패 시 아무 피드백 없이 "로딩 중" 에
+                //        멈춰버리는 문제를 방지하고, 다운로드 버튼으로 유도한다.
+                //        (handlers 를 src 보다 먼저 등록해 캐시된 즉시 로드도 놓치지 않음)
+                img.onload  = () => { msg.style.display = 'none'; };
+                img.onerror = () => {
+                    msg.style.display = 'none';
+                    container.innerHTML =
+                        "<div style='text-align:center;padding:20px;color:#c0392b;'>" +
+                        "이미지를 불러오지 못했습니다.<br>아래 [원본 다운로드] 버튼을 이용해 주세요.</div>";
+                };
+                img.src = url;
                 container.appendChild(img);
-            } 
+            }
             // 3. PDF 파일인 경우 (pdf.js로 렌더링) — 모든 페이지를 위→아래 세로로 표시
             else if (/\.pdf$/i.test(lower)) {
                 const loadingTask = pdfjsLib.getDocument(url);
