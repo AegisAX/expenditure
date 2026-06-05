@@ -605,7 +605,8 @@
          중간 페이지 경계엔 여백이 0 이라 내용이 종이 가장자리에 붙어 인쇄되는 문제가 있었다.
          @page margin 적용 시 인쇄가능 영역은 (210-30) x (297-30) = 180mm x 267mm. */
       @page { size: A4; margin: 15mm; }
-      html, body { width: 180mm; height: 100%; margin: 0; padding: 0; background-color: white; -webkit-print-color-adjust: exact; }
+      /* [빈 페이지 방지] height: 100% 는 모바일 인쇄에서 한 페이지를 추가로 reserve 할 수 있어 auto 로 둔다. */
+      html, body { width: 180mm; height: auto; margin: 0; padding: 0; background-color: white; -webkit-print-color-adjust: exact; }
       /* @page margin 이 여백을 담당하므로 .page 의 padding 은 제거. 폭은 인쇄가능폭(180mm)에 맞춤.
          [빈 페이지 방지] min-height 를 두지 않는다. 이전엔 min-height:267mm(=인쇄가능 높이와 정확히 동일)
          를 줬는데, 브라우저 sub-pixel 반올림으로 .page 가 267mm 를 미세하게 초과해 거의 빈 2페이지가
@@ -645,11 +646,15 @@
       .submit-btn, .list-btn, .temp-btn, .approve-btn, .reject-btn, .print-btn, .btn-area, .del-btn, .file-del-btn, #file-input-wrapper, #new-file-area, #att-guide-text, #attachment-table { display: none !important; }
       .file-link { text-decoration: none; color: black; pointer-events: none; }
       #print-image-container.visible { display: block !important; width: 100%; margin: 0; padding: 0; }
-      /* [첨부 페이지] @page margin:15mm 적용 후 인쇄가능 영역(180 x 267mm)에 맞춰 박스 치수 재계산.
-         @page margin 이 이미 종이 가장자리 여백을 담당하므로 box 자체 padding 은 0.
-         height 는 인쇄가능 높이(267mm)보다 1mm 작게(266mm) 두어 sub-pixel 반올림으로 인한
-         빈 페이지 overflow 를 방지(기존 296mm/297mm 패턴과 동일한 안전마진). */
-      .print-att-box { page-break-before: always; break-before: page; width: 180mm; height: 266mm; box-sizing: border-box; padding: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; border: none; margin: 0; overflow: hidden; }
+      /* [첨부 페이지] @page margin:15mm 적용 후 인쇄가능 영역은 180 x 267mm.
+         [모바일 빈 페이지 방지] 박스에 강제 전면 높이(이전 height:266mm)를 두지 않는다.
+         266mm 는 데스크탑에선 267mm 안에 들어갔지만, 모바일 인쇄는 스케일/DPI 처리가 달라
+         266mm 박스가 인쇄가능 높이를 미세하게 초과 → 마지막 첨부가 다음 페이지로 흘러넘쳐
+         맨 끝에 빈 페이지가 생기는 문제가 있었다. 고정 높이를 제거하면 박스가 내용(라벨+이미지)
+         높이로 줄어(이미지 max-height 245mm + 라벨 ≈ 255mm < 267mm) 절대 넘치지 않는다.
+         page-break-before:always 로 각 첨부는 여전히 새 페이지에서 시작한다.
+         (전면 높이가 없어 세로 중앙정렬은 무의미 → flex-start 로 라벨 아래 상단 정렬) */
+      .print-att-box { page-break-before: always; break-before: page; width: 180mm; box-sizing: border-box; padding: 0; display: flex; flex-direction: column; justify-content: flex-start; align-items: center; border: none; margin: 0; overflow: hidden; }
       .print-att-label { font-weight: bold; font-size: 14px; margin-bottom: 10px; display: block; width: 100%; text-align: left; }
       .print-att-img { max-width: 100%; max-height: 245mm; object-fit: contain; display: block; box-shadow: none; }
       .table-scroll-wrapper { overflow: visible; display: block; }
