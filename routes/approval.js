@@ -610,7 +610,11 @@ router.get('/api/download/*', (req, res) => {
             if (!row) {
                 if (user.role !== 'Admin') return res.status(403).send('권한이 없습니다 (문서 정보 없음).');
             } else {
-                const isPublicStatus  = ['최종결재', '지급완료'].includes(row.status);
+                // [종결 상태] 일반 기안(G)의 종결 상태 '결재완료' 포함.
+                //   누락 시 일반 기안 종결 문서의 첨부파일을 기안자·결재자가 아닌
+                //   일반 회원이 열람·다운로드하지 못하는 버그가 됨.
+                //   /list authClause, /form CLOSED_STATUSES, lock 정책과 일관성 유지.
+                const isPublicStatus  = ['최종결재', '지급완료', '결재완료'].includes(row.status);
                 const isOwnerOrAdmin  = (row.applicantEmail === user.email) || (user.role === 'Admin');
                 const isApprover      = ['사무총장', '총동문회장', '재무국장'].includes(user.position);
                 if (!isPublicStatus && !isOwnerOrAdmin && !isApprover) return res.status(403).send('권한이 없습니다 (결재 진행 중인 타인의 문서).');
