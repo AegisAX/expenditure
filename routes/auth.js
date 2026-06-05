@@ -36,9 +36,20 @@ router.post('/api/login', loginRateLimiter, loginValidator, (req, res) => {
             resetLoginAttempts(req.ip);  // ← 승인된 사용자만 초기화
             const { password: _pw, ...safeUser } = row;
             req.session.user = safeUser;
-            req.session.save();
-            logAction(req, 'LOGIN', '로그인 성공');
-            res.json({ status: 'Approved', url: '/list' });
+            // [중요] 세션을 SQLite 에 영속화한 뒤 응답을 보낸다.
+            //   이전엔 callback 없이 req.session.save() 호출 후 즉시 res.json 했으나,
+            //   세션 저장 완료 전에 응답이 가면 클라이언트가 다음 페이지로 이동했을 때
+            //   서버가 같은 sessionID 로 SQLite 조회해도 user 가 없어 /login 으로 리다이렉트되는
+            //   race 가 가끔 발생했다.
+            req.session.save((saveErr) => {
+                if (saveErr) {
+                    console.error(`[Login Session Save Error] sessionID=${req.sessionID}`, saveErr.message);
+                    return res.json({ status: 'Fail', msg: '세션 저장 실패. 잠시 후 다시 시도해 주세요.' });
+                }
+                console.log(`[LOGIN OK] ${email}  sessionID=${req.sessionID}`);
+                logAction(req, 'LOGIN', '로그인 성공');
+                res.json({ status: 'Approved', url: '/list' });
+            });
         } else {
             recordLoginFailure(req.ip);  // ← 실패 카운트
             logAction(req, 'LOGIN_FAIL', `실패: ${email}`);
