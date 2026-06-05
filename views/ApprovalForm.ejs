@@ -606,18 +606,23 @@
          @page margin 적용 시 인쇄가능 영역은 (210-30) x (297-30) = 180mm x 267mm. */
       @page { size: A4; margin: 15mm; }
       html, body { width: 180mm; height: 100%; margin: 0; padding: 0; background-color: white; -webkit-print-color-adjust: exact; }
-      /* @page margin 이 여백을 담당하므로 .page 의 padding 은 제거. 폭은 인쇄가능폭(180mm)에 맞춤. */
-      .page { width: 180mm; min-height: 267mm; padding: 0; box-sizing: border-box; border: none; margin: 0; page-break-after: auto; box-shadow: none; }
+      /* @page margin 이 여백을 담당하므로 .page 의 padding 은 제거. 폭은 인쇄가능폭(180mm)에 맞춤.
+         [빈 페이지 방지] min-height 를 두지 않는다. 이전엔 min-height:267mm(=인쇄가능 높이와 정확히 동일)
+         를 줬는데, 브라우저 sub-pixel 반올림으로 .page 가 267mm 를 미세하게 초과해 거의 빈 2페이지가
+         생기고 첨부(page-break-before:always)가 3페이지로 밀리는 문제가 있었다.
+         min-height 를 제거하면 페이지가 내용 높이에 맞게 줄어 빈 페이지가 생기지 않는다.
+         (짧은 문서의 하단 여백은 정상) 본문이 길면 @page margin:15mm 로 모든 페이지 균일 여백 유지. */
+      .page { width: 180mm; padding: 0; box-sizing: border-box; border: none; margin: 0; page-break-after: auto; box-shadow: none; }
       .main-title { position: static !important; margin: 0 0 20px 0 !important; padding: 0 !important; border-bottom: none !important; }
       #bodyContent { display: none !important; }
       /* [에디터] 인쇄 시 에디터/뷰는 숨기고, 인쇄 전용 div 만 보여준다. */
       #bodyContentEditor, #bodyContentView { display: none !important; }
-      /* 인쇄 시 본문 영역에 최소 높이 부여하여 첫 페이지가 자연스럽게 채워지도록 함.
-         A4 사용 가능 영역(약 267mm) 기준, 상하 결재선/제목/집행내역 등을 제외하고
-         본문이 약 100mm 이상 차지해야 페이지가 비어보이지 않음. */
+      /* [빈 페이지 방지] 본문 영역에 강제 min-height 를 두지 않는다.
+         이전엔 min-height:100mm 로 본문이 짧아도 100mm 를 차지하게 했는데,
+         처리자/결재선/제목/집행내역 표와 합산 시 한 페이지(267mm)를 넘겨 빈 페이지를 유발했다.
+         자연 높이로 두면 짧은 본문도 한 페이지에 들어간다. */
       #print-body-content-view {
           display: block !important;
-          min-height: 100mm;
           padding: 15px 5px !important;
           box-sizing: border-box;
           /* [에디터] HTML 렌더로 바뀌므로 pre-wrap 대신 일반 흐름 */
