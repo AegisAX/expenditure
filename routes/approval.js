@@ -140,10 +140,15 @@ router.get('/form', async (req, res) => {
         return res.render('ApprovalForm', { user, mode: 'WRITE', docNum: '', docType, initDataJSON: serialize({}, { isJSON: true }), ...commonData, listPage, listKeyword, listAuthor });
     }
 
+    // [LOCK 정책] 결재가 종결된 문서(지출결의서 '최종결재'·'지급완료', 일반 기안 '결재완료')는
+    //   더 이상 수정·결재가 불가능한 읽기 전용 상태이므로 Lock 검사를 건너뛴다.
+    //   누구나 동시에 열람할 수 있어야 한다.
+    const CLOSED_STATUSES = ['최종결재', '지급완료', '결재완료'];
+
     db.get("SELECT * FROM approvals WHERE docNum = ?", [docNum], (err, doc) => {
         if (err || !doc) return res.send(renderAlertHTML('존재하지 않거나 삭제된 문서입니다.'));
         if (doc.status === '작성중' && doc.applicantEmail !== user.email) return res.send(renderAlertHTML('기안자에 의해 회수된 문서입니다. 목록을 갱신합니다.'));
-        if (doc.locked_at && doc.locked_by_email && doc.locked_by_email !== user.email) {
+        if (!CLOSED_STATUSES.includes(doc.status) && doc.locked_at && doc.locked_by_email && doc.locked_by_email !== user.email) {
             const diffMin = (Date.now() - new Date(doc.locked_at).getTime()) / 1000 / 60;
             if (diffMin < 3) {
                 const actionMsg = (doc.locked_by_email === doc.applicantEmail) ? "문서를 수정 중입니다." : "결재 진행 중입니다.";
@@ -542,7 +547,9 @@ router.post('/api/lock/acquire', (req, res) => {
     const { docNum } = req.body;
     db.get("SELECT status, applicantEmail, locked_by_name, locked_by_email, locked_at FROM approvals WHERE docNum = ?", [docNum], (err, row) => {
         if (err || !row) return res.json({ status: 'Error', msg: '문서가 없습니다.' });
-        if (['최종결재', '지급완료'].includes(row.status)) return res.json({ status: 'Success', message: 'Read-only mode (No lock required)' });
+        // [LOCK 정책] 종결 상태(지출결의서 '최종결재'·'지급완료', 일반 기안 '결재완료')는
+        //   읽기 전용이므로 Lock 자체를 발급하지 않는다.
+        if (['최종결재', '지급완료', '결재완료'].includes(row.status)) return res.json({ status: 'Success', message: 'Read-only mode (No lock required)' });
         if (row.status === '작성중' && user.email !== row.applicantEmail) return res.json({ status: 'Recalled', msg: '기안자에 의해 회수된 문서입니다.' });
         if (row.locked_at && row.locked_by_email && row.locked_by_email !== user.email) {
             const diffMin = (Date.now() - new Date(row.locked_at).getTime()) / 1000 / 60;
