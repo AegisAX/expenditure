@@ -598,10 +598,16 @@
       .item-table tfoot td:nth-child(3) { display: none; }
     }
 
-    @media print { 
-      @page { size: A4; margin: 0; }
-      html, body { width: 210mm; height: 100%; margin: 0; padding: 0; background-color: white; -webkit-print-color-adjust: exact; }
-      .page { width: 210mm; min-height: 296mm; padding: 15mm; box-sizing: border-box; border: none; margin: 0; page-break-after: auto; box-shadow: none; }
+    @media print {
+      /* [인쇄 여백] @page margin 으로 모든 페이지(내용 overflow 로 생긴 중간 페이지 포함)에
+         균일한 15mm 여백을 적용한다. 이전엔 .page 의 padding:15mm 로 여백을 줬는데
+         padding 은 첫 페이지 상단/마지막 페이지 하단에만 공간을 만들 뿐, overflow 로 생긴
+         중간 페이지 경계엔 여백이 0 이라 내용이 종이 가장자리에 붙어 인쇄되는 문제가 있었다.
+         @page margin 적용 시 인쇄가능 영역은 (210-30) x (297-30) = 180mm x 267mm. */
+      @page { size: A4; margin: 15mm; }
+      html, body { width: 180mm; height: 100%; margin: 0; padding: 0; background-color: white; -webkit-print-color-adjust: exact; }
+      /* @page margin 이 여백을 담당하므로 .page 의 padding 은 제거. 폭은 인쇄가능폭(180mm)에 맞춤. */
+      .page { width: 180mm; min-height: 267mm; padding: 0; box-sizing: border-box; border: none; margin: 0; page-break-after: auto; box-shadow: none; }
       .main-title { position: static !important; margin: 0 0 20px 0 !important; padding: 0 !important; border-bottom: none !important; }
       #bodyContent { display: none !important; }
       /* [에디터] 인쇄 시 에디터/뷰는 숨기고, 인쇄 전용 div 만 보여준다. */
@@ -634,9 +640,13 @@
       .submit-btn, .list-btn, .temp-btn, .approve-btn, .reject-btn, .print-btn, .btn-area, .del-btn, .file-del-btn, #file-input-wrapper, #new-file-area, #att-guide-text, #attachment-table { display: none !important; }
       .file-link { text-decoration: none; color: black; pointer-events: none; }
       #print-image-container.visible { display: block !important; width: 100%; margin: 0; padding: 0; }
-      .print-att-box { page-break-before: always; break-before: page; width: 210mm; height: 296mm; box-sizing: border-box; padding: 15mm; display: flex; flex-direction: column; justify-content: center; align-items: center; border: none; margin: 0; overflow: hidden; }
+      /* [첨부 페이지] @page margin:15mm 적용 후 인쇄가능 영역(180 x 267mm)에 맞춰 박스 치수 재계산.
+         @page margin 이 이미 종이 가장자리 여백을 담당하므로 box 자체 padding 은 0.
+         height 는 인쇄가능 높이(267mm)보다 1mm 작게(266mm) 두어 sub-pixel 반올림으로 인한
+         빈 페이지 overflow 를 방지(기존 296mm/297mm 패턴과 동일한 안전마진). */
+      .print-att-box { page-break-before: always; break-before: page; width: 180mm; height: 266mm; box-sizing: border-box; padding: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; border: none; margin: 0; overflow: hidden; }
       .print-att-label { font-weight: bold; font-size: 14px; margin-bottom: 10px; display: block; width: 100%; text-align: left; }
-      .print-att-img { max-width: 100%; max-height: 250mm; object-fit: contain; display: block; box-shadow: none; }
+      .print-att-img { max-width: 100%; max-height: 245mm; object-fit: contain; display: block; box-shadow: none; }
       .table-scroll-wrapper { overflow: visible; display: block; }
       .item-table { min-width: 100%; width: 100%; }
       .content-cell { height: auto !important; }
