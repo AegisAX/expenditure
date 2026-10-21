@@ -140,3 +140,6 @@ db
 uploads
 .env
 .claude/
+
+# Local backup configuration, credentials and state
+.backup/

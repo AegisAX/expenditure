@@ -1,47 +1,51 @@
-# 개발·운영 일일 백업
+# 독립 전체 백업 (development)
 
-매일 04:00 Asia/Seoul에 `tools/backup.sh`를 실행한다. 서버 시스템 시간대도 Asia/Seoul이어야 한다.
+이 프로젝트의 tools/backup.sh만 실행하면 전체 소스·설정·DB 백업과 NAS 전송을 수행한다. 다른 프로젝트 디렉토리나 스크립트를 참조하지 않는다.
 
-- 저장 위치: `/home/whitehat/backups/expenditure/production/`, `development/`
-- 보관: 최근 14일. 해당 환경의 새 백업 검증 성공 후에만 만료된 백업을 삭제한다.
-- 로그: `/home/whitehat/backups/expenditure/backup.log`
-- 백업: SQLite 스냅샷(data.sqlite, sessions.db), uploads 전체, .env, Compose, Dockerfile, package 파일, 이미지 ID와 코드 해시/커밋 정보.
-- 각 환경의 컨테이너를 잠시 중지해 DB와 파일을 함께 백업하고, 실패 시에도 원래 실행 중인 컨테이너를 다시 시작한다. 원래 중지된 컨테이너는 그대로 둔다.
-- 압축 전체를 읽어 검사하고 DB 무결성을 검증한 후에만 최종 파일명으로 확정한다.
-- 파일은 소유자만 접근할 수 있다. DB·환경변수·첨부파일에는 비밀값과 개인정보가 있으므로 공개 저장소에 업로드하지 않는다.
-- 수동 실행: `/home/whitehat/expenditure_dev/tools/backup.sh`
-- 실패 시 로그에 FAILED와 오류 원인이 남고 종료 코드는 1이다. 외부 알림/서버 외부 복제는 별도 설정이 필요하다.
+## 실행과 설정
 
-## 복구
+- 예약: 매일 04:10 KST. 서버 cron 시간대는 Asia/Seoul이다.
+- 수동 실행: 프로젝트 디렉토리에서 `./tools/backup.sh`.
+- 로컬 설정: `.backup/config.json`. Git에는 `tools/backup.example.json`만 보관한다.
+- 프로젝트 경로는 스크립트 위치로 자동 계산한다. Docker 컨테이너는 현재 프로젝트의 Compose 서비스(web)에서 찾아 고정 컨테이너명을 사용하지 않는다.
+- 기본 보관 위치: 프로젝트 기준 `../backups/expenditure/development`. config의 backup_dir로 변경할 수 있다.
+- 로컬 보관: 7일. 새 백업 검증 성공 후에만 해당 프로젝트의 만료 백업을 삭제한다.
+- NAS: `/AegisAX_Backup/expenditure/development`, 30일 보관.
+- 로그: 로컬 백업 디렉토리의 backup.log, nas-upload.log, cron.log.
+- 프로젝트별 `.backup/backup.lock`, upload.lock으로 중복 실행을 막는다.
 
-1. 로그에서 SUCCESS를 확인한 백업을 고르고 소유자 전용 임시 디렉토리에 푼다.
-2. `backup-info.json`의 이미지 ID/커밋과 코드 해시를 참고해 해당 버전의 코드를 준비한다. 이 일일 백업은 전체 소스나 Docker 이미지를 포함하지 않는다.
-3. 대상 컨테이너를 중지하고 현재 DB·업로드·환경설정을 별도로 보관한다.
-4. `db/`, `uploads/`, `.env`, `docker-compose.yml`을 해당 개발 또는 운영 프로젝트에 복원한다. 기존 DB의 WAL/SHM이 남아 복원 DB와 섞이지 않도록 DB 디렉토리 전체를 교체한다.
-5. 환경별 포트/경로와 파일 권한을 확인하고 `docker compose up -d --build`로 시작한다.
-6. 로그인·문서·첨부파일과 기동 로그를 확인한다.
+## 백업 내용
 
-동일 서버의 백업은 디스크 장애에 대비하지 못한다. 별도 장비에 암호화한 사본을 보관해야 한다.
+- `source/`: 실제 프로젝트 소스 전체. Git 추적 여부와 관계없이 파일을 복사하고 SHA-256 목록을 기록한다.
+- `.git`, node_modules, 캐시, 로컬 에이전트 상태 및 `.backup/`는 source에서 제외한다.
+- `db/`: data.sqlite, sessions.db의 SQLite 백업 API 스냅샷(WAL 반영).
+- 전자결재의 uploads/는 별도 영역에 포함한다. moiso는 별도 업로드 볼륨을 사용하지 않는다.
+- `.env`, docker-compose.yml, Dockerfile, package 파일, backup-info.json, backup-config.json도 포함한다.
+- 백업을 만드는 동안 이 프로젝트의 컨테이너만 잠시 중지하고, 실패 시에도 원래 실행 중이었다면 다시 시작한다.
+- 압축 전체·소스 해시·DB 무결성 검증 후에만 최종 백업 파일로 확정한다.
+- NAS 전송은 .partial로 올린 후 다시 내려받아 SHA-256을 검사하고 최종 파일명으로 변경한다.
+- 전송에 실패해도 로컬 백업은 남는다. 다음 실행에서 남은 미전송 파일을 재시도한다.
+- 기존 구형 백업은 그대로 유지한다. source/가 없는 구형 백업은 별도 소스가 필요하다.
 
-## Synology NAS 복제
+## 인증정보
 
-로컬 백업 종료 후 `tools/nas-upload.py`를 호출한다. NAS 실패가 로컬 백업 생성을 막지 않으며, 다음 실행에서 로컬에 남은 미전송 파일을 재시도한다.
+NAS 인증은 이 프로젝트의 `.backup/id_ed25519`, id_ed25519.pub, known_hosts를 사용한다. 다른 프로젝트의 인증정보를 참조하지 않는다. 키의 사본을 분리 배치했으며 NAS 공개키 등록을 새로 할 필요는 없다.
 
-- NAS: `192.168.118.250:54321`, SFTP 계정 `whitehat`
-- 설정: `/home/whitehat/backups/expenditure/.nas/config.json` (Git 제외)
-- 인증키: 같은 폴더의 `id_ed25519` / `id_ed25519.pub`. 개인키는 서버에만 보관한다.
-- 호스트키: 기존 `/home/whitehat/.ssh/known_hosts`와 엄격하게 대조한다.
-- 대상 경로: `/AegisAX_Backup/expenditure/{production,development}/`. `/AegisAX_Backup`은 인증 후 실제 SFTP 경로를 확인해야 한다.
-- 전송 후 다시 내려받아 SHA-256을 대조한 뒤 `.partial` 파일을 최종 이름으로 변경한다.
-- 업로드 이력과 NAS 파일 존재를 확인하여 중복 전송을 줄인다. 목적지가 바뀌면 다시 전송한다.
-- 달력 기준 한 달 이전 파일은 해당 환경의 검증된 사본이 확인된 실행에서만 정리한다. 생성 규칙에 맞는 일일 백업 이름만 삭제하며 다른 NAS 파일은 건드리지 않는다.
-- NAS 로그: `/home/whitehat/backups/expenditure/nas-upload.log`
-- 인증 확인: `python3 tools/nas-upload.py --check`
-- 인증·경로·최초 전송 검증 전에는 config의 `enabled`를 false로 유지한다. 검증 후 true로 바꾸고 `python3 tools/nas-upload.py`로 첫 전송을 수행한다.
-- 전송 로직 테스트: `python3 -B -m unittest discover -s tests -p 'test_nas_upload.py'`
+`.backup/`는 Git·Docker 빌드·소스 백업에서 제외한다. 디렉토리는 700, 개인키·실제 설정·전송 이력은 600으로 관리한다. 인증키는 백업에 포함하지 않으며 별도의 안전한 방법으로 서버 이전 시 옮기거나 새 키를 발급해야 한다.
 
-### NAS 공개키 등록
+- 연결 확인: `python3 tools/nas-upload.py --check`
+- 전송만 재시도: `python3 tools/nas-upload.py`
 
-Synology DSM의 사용자 홈 서비스를 활성화하고 `whitehat` 계정의 홈 아래 `.ssh/authorized_keys`에 생성된 **공개키 한 줄**을 추가한다. 기존 authorized_keys를 덮어쓰지 않는다. 디렉토리 권한은 700, 키 파일은 600으로 설정하고 소유자는 whitehat으로 유지한다. SSH 셸을 이용한다면 NAS의 실제 SSH 서비스 포트를 사용한다(SFTP 포트와 다를 수 있다).
+## 복구 및 서버 이전
 
-공식 안내: https://kb.synology.com/en-us/DSM/tutorial/How_to_log_in_to_DSM_with_key_pairs_as_admin_or_root_permission_via_SSH_on_computers
+1. 접근 제한된 임시 공간에 검증된 최신 백업을 푼다.
+2. 빈 프로젝트 디렉토리에 source/ 내용을 복원한다. GitHub 없이 앱 소스를 복원할 수 있다.
+3. 대상 컨테이너를 중지하고 현재 데이터를 별도로 보관한 뒤 db/와 uploads/(있는 경우), 루트 .env·Compose를 복원한다. 기존 DB의 WAL/SHM과 섞지 않는다.
+4. `.backup/`를 권한 700으로 만들고 backup-config.json을 `.backup/config.json`으로 복원한다. 또는 tools/backup.example.json에서 새로 설정한다.
+5. 개인키·known_hosts를 안전하게 옮기거나 새로 등록한다. 서버가 달라지면 환경설정·포트·backup_dir·NAS 접근을 확인한다. 상대 경로 설정이므로 기존 서버 홈 경로에 의존하지 않는다.
+6. Docker/Compose, Python 3.9 이상, OpenSSH SFTP와 Asia/Seoul 시간대를 준비한다.
+7. `docker compose up -d --build`로 시작하고 로그인·상태를 확인한다. Docker 이미지·node_modules는 포함하지 않으므로 베이스 이미지 및 npm 저장소 접근은 필요하다.
+8. 이 프로젝트의 tools/backup.sh 경로만 cron에 등록한다. cron 자체는 소스 파일이 아니므로 새 서버에 재등록해야 한다.
+9. 수동 백업·NAS 검증 후 예약 실행을 확인한다.
+
+자동 테스트: `python3 -B -m unittest discover -s tests -p 'test_*backup*.py'`와 `python3 -B -m unittest discover -s tests -p 'test_nas_upload.py'`.

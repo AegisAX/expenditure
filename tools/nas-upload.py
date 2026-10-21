@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """검증된 로컬 일일 백업을 SFTP로 복제. 비밀 설정은 저장소 밖에 보관."""
 import argparse
-import calendar
 import datetime
 import fcntl
 import hashlib
@@ -14,8 +13,8 @@ import subprocess
 import tempfile
 from zoneinfo import ZoneInfo
 
-BASE = Path('/home/whitehat/backups/expenditure')
-PRIVATE = BASE / '.nas'
+PROJECT = Path(__file__).resolve().parents[1]
+PRIVATE = PROJECT / '.backup'
 CONFIG = PRIVATE / 'config.json'
 BACKUP_NAME = re.compile(r'^\d{8}-\d{6}-\d{6}\.tar\.gz$')
 
@@ -34,9 +33,8 @@ def sha256(path):
     return h.hexdigest()
 
 
-def month_ago(now):
-    year, month = (now.year - 1, 12) if now.month == 1 else (now.year, now.month - 1)
-    return now.replace(year=year, month=month, day=min(now.day, calendar.monthrange(year, month)[1]))
+def retention_cutoff(now, keep_days=30):
+    return now - datetime.timedelta(days=keep_days)
 
 
 class SFTP:
@@ -62,8 +60,12 @@ class SFTP:
 
     def directory(self, environment):
         # NAS 기존 공유 폴더 자체는 생성하지 않는다. 경로를 명시적으로 확인한다.
-        return ['cd ' + quote(self.config['remote_root']), '-mkdir expenditure',
-                'cd expenditure', '-mkdir ' + environment, 'cd ' + environment]
+        project = self.config['remote_project']
+        folder = self.config['remote_environment']
+        if not all(re.fullmatch(r'[a-z][a-z0-9_-]*', name) for name in [project, folder]):
+            raise ValueError('Invalid remote backup folder')
+        return ['cd ' + quote(self.config['remote_root']), '-mkdir ' + project,
+                'cd ' + project, '-mkdir ' + folder, 'cd ' + folder]
 
     def listing(self, environment):
         text = self.run(self.directory(environment) + ['ls -1'])
@@ -74,10 +76,11 @@ def upload(config, sftp):
     state_path = PRIVATE / 'uploaded.json'
     receipts = json.loads(state_path.read_text()) if state_path.exists() else {}
     failed = False
-    for environment in ['production', 'development']:
+    for environment in [config['environment']]:
         try:
             remote = sftp.listing(environment)
-            local = sorted((BASE / environment).glob('*.tar.gz'))
+            local_dir = Path(config['local_dir'])
+            local = sorted(local_dir.glob('*.tar.gz'))
             if not local:
                 raise RuntimeError('No local backup: ' + environment)
             verified = False
@@ -87,7 +90,7 @@ def upload(config, sftp):
                 digest = sha256(path)
                 receipt_key = environment + '/' + path.name
                 # NAS 목적지 변경 시 이전 전송 이력을 재사용하지 않는다.
-                destination = config['host'] + ':' + str(config['port']) + ':' + config['user'] + ':' + config['remote_root']
+                destination = config['host'] + ':' + str(config['port']) + ':' + config['user'] + ':' + config['remote_root'] + ':' + json.dumps({'remote_project': config['remote_project'], 'remote_environment': config['remote_environment']}, sort_keys=True)
                 if path.name in remote and receipts.get(receipt_key) == {'sha256': digest, 'destination': destination}:
                     verified = True
                     continue
@@ -108,9 +111,9 @@ def upload(config, sftp):
                 temporary.replace(state_path)
                 verified = True
                 logging.info('NAS SUCCESS: %s SHA-256 verified', receipt_key)
-            # 해당 환경의 검증된 사본을 확인한 실행에서만 한 달 지난 백업 삭제.
+            # 해당 환경의 검증된 사본을 확인한 실행에서만 30일 보관 기간이 지난 백업 삭제.
             if verified:
-                cutoff = month_ago(datetime.datetime.now(ZoneInfo('Asia/Seoul')))
+                cutoff = retention_cutoff(datetime.datetime.now(ZoneInfo('Asia/Seoul')), config.get('keep_days', 30))
                 for filename in sorted(remote):
                     created = datetime.datetime.strptime(filename[:-7], '%Y%m%d-%H%M%S-%f').replace(tzinfo=ZoneInfo('Asia/Seoul'))
                     if created < cutoff:
@@ -125,27 +128,31 @@ def upload(config, sftp):
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser()
-    parser.add_argument('--check', action='store_true', help='Authenticate and inspect configured remote root only')
+    parser.add_argument('--check', action='store_true')
+    parser.add_argument('--config', type=Path, default=CONFIG)
     args = parser.parse_args()
-    BASE.mkdir(mode=0o700, parents=True, exist_ok=True)
+    settings = json.loads(args.config.read_text())
+    destination = (PROJECT / settings['backup_dir']).resolve()
+    destination.mkdir(mode=0o700, parents=True, exist_ok=True)
     PRIVATE.mkdir(mode=0o700, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s',
-                        handlers=[logging.FileHandler(BASE / 'nas-upload.log'), logging.StreamHandler()])
-    if not CONFIG.exists():
-        logging.warning('NAS not configured: %s', CONFIG)
-        return 0
-    config = json.loads(CONFIG.read_text())
+                        handlers=[logging.FileHandler(destination / 'nas-upload.log'), logging.StreamHandler()])
+    config = dict(settings['nas'])
+    config['environment'] = settings['environment']
+    config['local_dir'] = str(destination)
+    for key in ['identity_file', 'known_hosts']:
+        config[key] = str((PROJECT / config[key]).resolve())
     if not config.get('enabled') and not args.check:
-        logging.warning('NAS upload pending authentication setup; disabled in %s', CONFIG)
+        logging.warning('NAS upload disabled for this project')
         return 0
     with (PRIVATE / 'upload.lock').open('w') as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            logging.error('NAS upload already running')
+            logging.error('NAS upload already running for this project')
             return 1
-        sftp = SFTP(config)
         try:
+            sftp = SFTP(config)
             if args.check:
                 output = sftp.run(['pwd', 'cd ' + quote(config['remote_root']), 'pwd'])
                 logging.info('NAS authentication and remote directory OK: %s', output.strip())

@@ -1,0 +1,24 @@
+{
+  "environment": "development",
+  "service": "web",
+  "backup_dir": "../backups/expenditure/development",
+  "databases": [
+    "data.sqlite",
+    "sessions.db"
+  ],
+  "uploads": true,
+  "keep_days": 7,
+  "health_marker": null,
+  "nas": {
+    "enabled": false,
+    "host": "nas.example.com",
+    "port": 22,
+    "user": "backup",
+    "remote_root": "/Backups",
+    "remote_project": "expenditure",
+    "remote_environment": "development",
+    "identity_file": ".backup/id_ed25519",
+    "known_hosts": ".backup/known_hosts",
+    "keep_days": 30
+  }
+}

@@ -3,3 +3,6 @@ db
 node_modules
 uploads
 .env
+
+# Local backup configuration, credentials and state
+.backup/
