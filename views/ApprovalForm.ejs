@@ -217,6 +217,9 @@
     .file-del-btn { background: #e74c3c; color: white; border: none; border-radius: 3px; padding: 4px 8px; cursor: pointer; font-size: 12px; margin-left: 5px; }
     
     #print-image-container { display: none; }
+    .approval-route-picker { margin: 12px 0; padding: 12px; background: #f0f4f8; }
+    .approval-route-picker select { max-width: 100%; padding: 8px; }
+    @media print { .approval-route-picker { display: none !important; } }
     .print-only-div { display: none; white-space: pre-wrap; word-break: break-all; padding: 5px; font-size: 14px; line-height: 1.5; text-align: left; }
 
     /* [PC 기본 설정] */
@@ -710,6 +713,19 @@
   <div class="page">
     <div class="main-title"><%= docType === 'G' ? '일반기안문' : '지출결의서' %></div>
     
+  <% if (mode === 'WRITE') { %>
+  <div class="approval-route-picker">
+    <label for="middleApproverEmail"><strong>중간 결재자 (선택)</strong></label>
+    <select id="middleApproverEmail">
+      <option value="">선택 안 함 — 총동문회장에게 바로 전달</option>
+      <option value="__legacy__" hidden>기존 결재선 — 사무총장</option>
+      <% approvers.forEach(person => { %>
+      <option value="<%= person.email %>" data-name="<%= person.name %>" data-position="<%= person.position %>"><%= person.name %> · <%= person.position %> (<%= person.email %>)</option>
+      <% }); %>
+    </select>
+    <div style="margin-top:6px;font-size:13px;">기안자 → 중간 결재자(선택) → 총동문회장<%= docType === 'E' ? ' → 재무국장' : '' %></div>
+  </div>
+  <% } %>
 	<div id="form-content"> 
 		<table class="processor-table">
 		  <tr>
@@ -739,7 +755,7 @@
 			<td colspan="2" class="label" style="border-bottom: none;">[ 예산집행의 품의 ]</td>
 			<td rowspan="4" class="label">결<br><br>재</td>
 			<td class="role-cell" id="header-applicant"><span id="u-pos-sign"></span></td>
-			<td class="role-cell" id="header-secretary">사무총장</td>
+			<td class="role-cell" id="header-secretary">중간 결재</td>
 			<td class="role-cell" id="header-president">총동문회장</td>
 		  </tr>
 		  <tr>
@@ -919,6 +935,41 @@
     let initData = {};
     let existingFiles = [];
     let newFilesQueue = [];
+
+    function updateMiddleApproverDisplay() {
+        const picker = document.getElementById('middleApproverEmail');
+        const email = picker ? picker.value : initData.middleApproverEmail;
+        const header = document.getElementById('header-secretary');
+        const signature = document.getElementById('sig-secretary');
+        if (email === '__legacy__' || email == null) {
+            header.textContent = '사무총장';
+        } else if (!email) {
+            header.textContent = '중간 결재 (생략)';
+            signature.innerHTML = '<div class="slash-mark">/</div>';
+        } else {
+            const option = picker && picker.selectedOptions[0];
+            const name = option ? option.dataset.name : initData.middleApproverName;
+            const position = option ? option.dataset.position : initData.middleApproverPosition;
+            header.textContent = `${position || '중간 결재'} (${name || email})`;
+            if (mode === 'WRITE') signature.innerHTML = '';
+        }
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+        const picker = document.getElementById('middleApproverEmail');
+        if (picker) {
+            if (initData.docNum) {
+                const email = initData.middleApproverEmail;
+                if (email && !Array.from(picker.options).some(o => o.value === email)) {
+                    const option = new Option(`${initData.middleApproverName || email} (현재 선택 불가 — 다시 선택하세요)`, email);
+                    option.disabled = true;
+                    picker.add(option);
+                }
+                picker.value = email == null ? '__legacy__' : email;
+            }
+            picker.addEventListener('change', updateMiddleApproverDisplay);
+        }
+        updateMiddleApproverDisplay();
+    });
 
     function formatNum(n) { if(!n) return ""; return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
     function unformatNum(s) { return parseFloat(s.toString().replace(/,/g, '')) || 0; }
@@ -1278,6 +1329,7 @@
           window.initViewMode(initData);
           renderViewButtons();
         }
+        updateMiddleApproverDisplay();
       } catch (err) { console.error(err); }
       finally { setTimeout(() => { document.getElementById('splash-screen').style.display='none'; }, 500); }
     };
@@ -1298,7 +1350,7 @@
     function renderViewButtons() {
         let html = "";
         let canSign = false;
-        if (myPos === "사무총장" && initData.status === "제출완료") canSign = true;
+        if (initData.status === "제출완료" && (initData.middleApproverEmail == null ? myPos === "사무총장" : !!initData.middleApproverEmail && initData.middleApproverEmail === myEmail)) canSign = true;
         if (myPos === "총동문회장" && initData.status === "결재중") canSign = true;
         if (myPos === "재무국장" && initData.status === "최종결재") canSign = true;
         
@@ -1364,6 +1416,8 @@
 
         const formData = new FormData();
         formData.append('docNum', dNum);
+        const middlePicker = document.getElementById('middleApproverEmail');
+        if (middlePicker && middlePicker.value !== '__legacy__') formData.append('middleApproverEmail', middlePicker.value);
         formData.append('docType', window.docType || 'E');   /* [B-5b] G 모드 식별용 */
         formData.append('subject', subj.value);
         // [WAF] 본문은 base64 인코딩하여 전송. 서버가 bodyContentEnc 플래그를 보고 디코딩한다.
@@ -1658,9 +1712,9 @@
 
       // 사무총장·총동문회장 자가 기안 시, 자가 승인되는 결재칸은 슬래시(/)로 표시
       // 총동문회장 기안 시 오른쪽 '총동문회장' 칸에는 본인 서명을 그대로 표시
-      if (d.applicantPos === '사무총장') {
+      if (d.applicantPos === '사무총장' && d.middleApproverEmail == null) {
         document.getElementById('sig-secretary').innerHTML = '<div class="slash-mark">/</div>';
-      } else if (d.applicantPos === '총동문회장') {
+      } else if (d.applicantPos === '총동문회장' && !d.middleApproverEmail) {
         document.getElementById('sig-secretary').innerHTML = '<div class="slash-mark">/</div>';
         renderSig('sig-president', d.signatures.applicant);
 			}
@@ -1668,8 +1722,8 @@
 
 		// 타인의 승인 서명은 기안자가 해당 직책이 아닐 때만 표시
     // 자가 기안 시 건너뛴 결재칸은 슬래시를 유지해야 하므로 렌더링 스킵
-		if (d.signatures.secretary && d.applicantPos !== '사무총장' && d.applicantPos !== '총동문회장') renderSig('sig-secretary', d.signatures.secretary);
-    if (d.signatures.president && d.applicantPos !== '총동문회장') renderSig('sig-president', d.signatures.president);
+		if (d.signatures.secretary && (d.middleApproverEmail || (d.applicantPos !== '사무총장' && d.applicantPos !== '총동문회장'))) renderSig('sig-secretary', d.signatures.secretary);
+    if (d.signatures.president && (d.middleApproverEmail || d.applicantPos !== '총동문회장')) renderSig('sig-president', d.signatures.president);
 
     // [STAGE_SKIP] 관리자가 사무총장 단계를 건너뛴 경우 사선(/) 표시.
     //              자결재 케이스와 동일한 시각 처리.

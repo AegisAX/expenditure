@@ -9,6 +9,7 @@ const { uploadDir, upload, saveFile, MAX_UPLOAD_MB } = require('../helpers/file'
 const { getTodayKST, getUser, getUserByPos, getNextDocNum, getSiteUrl, logAction } = require('../helpers/db');
 const { makeEmailHtml, sendEmail } = require('../helpers/email');
 const { approvalValidator, validatePassword, normalizeApprovalBody } = require('../middleware/validators');
+const { isMiddleApprover, canViewDocument } = require('../helpers/approval');
 const { sanitizeBodyHtml } = require('../helpers/sanitize');
 
 // [B-2] docType 별 메타 정보. 라벨/접두어/파일명 라벨 분기에 사용.
@@ -58,9 +59,9 @@ router.get('/list', (req, res) => {
         if (user.role !== 'Admin') {
             // [B-2] '결재완료'(일반 기안 종결 상태) 추가.
             //       기존 정책: 본인 기안 OR 종결된 공개 문서 OR 결재 단계별 담당자만 조회 가능.
-            authClause = ` AND (applicantEmail = ? OR status IN ('최종결재', '지급완료', '결재완료') OR (status = '제출완료' AND ? = '사무총장') OR (status = '결재중' AND ? IN ('총동문회장', '사무총장')))`;
+            authClause = ` AND (applicantEmail = ? OR status IN ('최종결재', '지급완료', '결재완료') OR (status IN ('제출완료', '결재중') AND (middleApproverEmail = ? OR (middleApproverEmail IS NULL AND ? = '사무총장'))) OR (status = '결재중' AND ? = '총동문회장'))`;
         }
-        const countParams = user.role !== 'Admin' ? [...params, user.email, user.position, user.position] : params;
+        const countParams = user.role !== 'Admin' ? [...params, user.email, user.email, user.position, user.position] : params;
 
         db.get(`SELECT COUNT(*) as total FROM approvals ${whereClause} ${authClause}`, countParams, (err, countRow) => {
             const totalDocs = countRow ? countRow.total : 0;
@@ -69,7 +70,7 @@ router.get('/list', (req, res) => {
                 SELECT *,
                 (
                     (applicantEmail = ? AND (status = '작성중' OR status = '반려')) OR
-                    (? = '사무총장' AND status = '제출완료') OR
+                    ((middleApproverEmail = ? OR (middleApproverEmail IS NULL AND ? = '사무총장')) AND status = '제출완료') OR
                     (? = '총동문회장' AND status = '결재중') OR
                     (? = '재무국장' AND status = '최종결재')
                 ) as spotlight
@@ -83,9 +84,9 @@ router.get('/list', (req, res) => {
                     docNum DESC
                 LIMIT ? OFFSET ?`;
             const queryParams = [
-                user.email, user.position, user.position, user.position,
+                user.email, user.email, user.position, user.position, user.position,
                 ...params,
-                ...(user.role !== 'Admin' ? [user.email, user.position, user.position] : []),
+                ...(user.role !== 'Admin' ? [user.email, user.email, user.position, user.position] : []),
                 limit, offset
             ];
             db.all(finalQuery, queryParams, (err, rows) => {
@@ -127,7 +128,11 @@ router.get('/form', async (req, res) => {
         if (sec) secInfo = sec;
     } catch (e) { console.error("Info Load Error", e); }
 
+    const approvers = await new Promise((resolve, reject) => db.all(
+        "SELECT email, name, position FROM users WHERE status='Approved' AND email != ? AND position != '총동문회장' ORDER BY name, email",
+        [user.email], (err, rows) => err ? reject(err) : resolve(rows)));
     const commonData = {
+        approvers,
         address,
         president: `${presInfo.name} (${presInfo.phone})`,
         secretary: `${secInfo.name} (${secInfo.phone})`,
@@ -147,6 +152,7 @@ router.get('/form', async (req, res) => {
 
     db.get("SELECT * FROM approvals WHERE docNum = ?", [docNum], (err, doc) => {
         if (err || !doc) return res.send(renderAlertHTML('존재하지 않거나 삭제된 문서입니다.'));
+        if (!canViewDocument(doc, user)) return res.status(403).send(renderAlertHTML('문서 열람 권한이 없습니다.'));
         if (doc.status === '작성중' && doc.applicantEmail !== user.email) return res.send(renderAlertHTML('기안자에 의해 회수된 문서입니다. 목록을 갱신합니다.'));
         if (!CLOSED_STATUSES.includes(doc.status) && doc.locked_at && doc.locked_by_email && doc.locked_by_email !== user.email) {
             const diffMin = (Date.now() - new Date(doc.locked_at).getTime()) / 1000 / 60;
@@ -209,6 +215,36 @@ router.post('/api/submit', (req, res, next) => {
     const user = getUser(req);
     const f = req.body;
 
+    const cleanupUploads = async () => {
+        for (const file of req.files || []) await fs.promises.unlink(file.path).catch(() => {});
+    };
+    let existingDoc;
+    let middleEmail = '', middleName = '', middlePosition = '';
+    try {
+        existingDoc = f.docNum ? await new Promise((resolve, reject) => db.get(
+            'SELECT * FROM approvals WHERE docNum=?', [f.docNum], (err, row) => err ? reject(err) : resolve(row))) : null;
+        if (f.docNum && !existingDoc) throw new Error('문서를 찾을 수 없습니다.');
+        if (existingDoc && (existingDoc.applicantEmail !== user.email || !['작성중', '반려'].includes(existingDoc.status))) {
+            throw new Error('본인의 작성중 또는 반려 문서만 수정할 수 있습니다.');
+        }
+        if (existingDoc) f.docType = existingDoc.docType || 'E';
+        if (f.docType === 'G') f.totalAmount = 0;
+        // 구버전 요청은 기존 결재선을 유지. 새 화면은 생략도 빈 문자열로 명시한다.
+        middleEmail = f.middleApproverEmail === undefined
+            ? (existingDoc ? existingDoc.middleApproverEmail : '') : String(f.middleApproverEmail).trim();
+        if (middleEmail) {
+            const person = await new Promise((resolve, reject) => db.get(
+                "SELECT email, name, position FROM users WHERE email=? AND status='Approved'", [middleEmail],
+                (err, row) => err ? reject(err) : resolve(row)));
+            if (!person || person.email === user.email || person.position === '총동문회장') throw new Error('선택할 수 없는 중간 결재자입니다.');
+            middleName = person.name;
+            middlePosition = person.position;
+        }
+    } catch (err) {
+        await cleanupUploads();
+        return res.status(400).json({ status: 'Error', msg: err.message });
+    }
+
     // [에디터] 본문 HTML sanitize.
     //   클라이언트(Toast UI Editor)에서 받은 HTML을 화이트리스트 기반으로 정화한다.
     //   - 허용: 기본 서식, 리스트, 표, 링크
@@ -228,15 +264,17 @@ router.post('/api/submit', (req, res, next) => {
     //  - 신규 작성: 클라이언트가 보낸 docType ('E' or 'G'). 그 외 값은 'E'로 강제.
     //  - 재제출(기존 docNum 존재): DB의 docType을 그대로 사용 (변조 방지). 아래에서 SELECT 후 재할당.
     let docType = (f.docType === 'G') ? 'G' : 'E';
-    const meta = getDocMeta(docType);
+    const meta = { ...getDocMeta(docType) };
 
-    // 자결재 분기 (docType에 따라 종결 상태가 다름)
+    // 선택 결재자가 없으면 회장 단계로 바로 전달한다. 기존 NULL 결재선은 사무총장 유지.
     if (initialStatus === '제출완료') {
-        if (user.position === '사무총장') {
+        if (middleEmail === '' || (middleEmail == null && user.position === '사무총장')) {
             initialStatus = '결재중';
-        } else if (user.position === '총동문회장') {
-            initialStatus = (docType === 'G') ? '결재완료' : '최종결재';
-            try { finalDocNum = await getNextDocNum(new Date().getFullYear()); } catch(e) { console.error("DocNum Error:", e); }
+        }
+        if (user.position === '총동문회장' && !middleEmail) {
+            initialStatus = docType === 'G' ? '결재완료' : '최종결재';
+            try { finalDocNum = await getNextDocNum(new Date().getFullYear()); }
+            catch (err) { await cleanupUploads(); return res.status(500).json({ status: 'Error', msg: '문서 번호 생성 실패' }); }
         }
     }
 
@@ -276,7 +314,7 @@ router.post('/api/submit', (req, res, next) => {
             db.run("UPDATE approvals SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE docNum=?", [finalDocNum]);
             // 본인 기안 시 자동 승인되는 결재 단계를 DB 에도 기록 (감사 추적용)
             const today = getTodayKST();
-            if (user.position === '사무총장' && initialStatus === '결재중') {
+            if (middleEmail == null && user.position === '사무총장' && initialStatus === '결재중') {
                 db.run(
                     "UPDATE approvals SET secName=?, secSig=?, secDate=? WHERE docNum=?",
                     [user.name, user.signature_path, today, finalDocNum]
@@ -290,7 +328,7 @@ router.post('/api/submit', (req, res, next) => {
             }
             let msg = "제출되었습니다.";
             if (initialStatus === '작성중') msg = "임시저장 되었습니다.";
-            else if (initialStatus === '결재중') msg = "제출 및 사무총장 자동 승인 완료 (총동문회장 결재 단계).";
+            else if (initialStatus === '결재중') msg = "제출되었습니다. 총동문회장 결재 대기 중입니다.";
             else if (initialStatus === '최종결재') msg = "제출 및 최종 승인 완료 (재무국장 지급 단계).";
             else if (initialStatus === '결재완료') msg = "제출 및 결재 완료 (총동문회장 자동 결재).";
 
@@ -298,7 +336,7 @@ router.post('/api/submit', (req, res, next) => {
             //           자결재 케이스(사무총장/총동문회장 자가기안)도 '제출' 행위 자체는 동일하게 기록한다.
             //           최종 도달 상태(initialStatus)와 docType, 제목을 함께 남겨 추적성 확보.
             if (initialStatus !== '작성중') {
-                const meta = getDocMeta(docType);
+                const meta = { ...getDocMeta(docType) };
                 const subjectForLog = (f.subject && f.subject.trim()) ? f.subject : '(제목 없음)';
                 logAction(req, 'DOC_SUBMIT',
                     `문서 제출(${meta.label}): ${finalDocNum} (제목: ${subjectForLog}, 도달상태: ${initialStatus})`);
@@ -311,7 +349,7 @@ router.post('/api/submit', (req, res, next) => {
                 // [B-2] 메일 발송 분기. 일반 기안의 '결재완료' 자결재는 외부 통지가 불필요하므로 발송 안 함.
                 let recipientEmail = null, mailSubject = '';
                 if (initialStatus === '제출완료') {
-                    const r = await getUserByPos('사무총장');
+                    const r = middleEmail ? { email: middleEmail } : await getUserByPos('사무총장');
                     if (r) { recipientEmail = r.email; mailSubject = `[결재요청] ${meta.label} - ${f.subject}`; }
                 } else if (initialStatus === '결재중') {
                     const r = await getUserByPos('총동문회장');
@@ -328,7 +366,7 @@ router.post('/api/submit', (req, res, next) => {
 
         // [B-2] 재제출 시 docType은 DB값을 그대로 유지(클라이언트가 변경 못 함).
         //       UPDATE 쿼리에는 docType을 포함하지 않으므로 자동 보존된다.
-        db.get("SELECT docNum, docType FROM approvals WHERE docNum = ?", [finalDocNum], (err, row) => {
+        db.get("SELECT docNum, docType FROM approvals WHERE docNum = ?", [existingDoc ? existingDoc.docNum : finalDocNum], (err, row) => {
             if (row) {
                 // 기존 문서 재제출: DB의 docType을 신뢰
                 docType = row.docType || 'E';
@@ -339,22 +377,22 @@ router.post('/api/submit', (req, res, next) => {
                     //        이전 결재자 서명(secSig/presSig 등)이 DB에 잔존해 감사 트레일이 오염되는 문제를 해결
                     // [STAGE_SKIP] 재제출 시 건너뛰기 흔적도 함께 초기화 (감사 트레일 무결성)
                     "UPDATE approvals SET \
-                        subject=?, bodyContent=?, totalAmount=?, reqDate=?, items=?, status=?, file_paths=?, \
+                        docNum=?, subject=?, bodyContent=?, totalAmount=?, reqDate=?, items=?, status=?, file_paths=?, \
                         appPos=?, appName=?, appPhone=?, appSig=?, \
                         secName=NULL, secSig=NULL, secDate=NULL, \
                         presName=NULL, presSig=NULL, executionDate=NULL, \
                         secSkippedBy=NULL, secSkippedAt=NULL, secSkippedReason=NULL, \
-                        payDate=NULL \
+                        middleApproverEmail=?, middleApproverName=?, middleApproverPosition=?, payDate=NULL \
                      WHERE docNum=?",
-                    [f.subject, f.bodyContent, f.totalAmount, finalReqDate, itemsStr, initialStatus, filePathsStr,
+                    [finalDocNum, f.subject, f.bodyContent, f.totalAmount, finalReqDate, itemsStr, initialStatus, filePathsStr,
                     user.position, user.name, user.phone, user.signature_path,
-                    finalDocNum],
+                    middleEmail, middleName, middlePosition, existingDoc.docNum],
                     (err) => err ? res.json({ msg: err.message }) : afterSave()
                 );
             } else {
                 // 신규 작성: docType 포함하여 INSERT
-                db.run(`INSERT INTO approvals (docNum, applicantEmail, subject, bodyContent, totalAmount, reqDate, items, status, appPos, appName, appPhone, appSig, file_paths, docType, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-                    params, (err) => err ? res.json({ msg: "DB 오류: " + err.message }) : afterSave());
+                db.run(`INSERT INTO approvals (docNum, applicantEmail, subject, bodyContent, totalAmount, reqDate, items, status, appPos, appName, appPhone, appSig, file_paths, docType, middleApproverEmail, middleApproverName, middleApproverPosition, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+                    [...params, middleEmail, middleName, middlePosition], (err) => err ? res.json({ msg: "DB 오류: " + err.message }) : afterSave());
             }
         });
     } catch(e) {
@@ -368,17 +406,21 @@ router.post('/api/approve', (req, res) => {
     const user = getUser(req);
     const { docNum, action } = req.body;
     const todayStr = getTodayKST();
+    if (!['APPROVE', 'REJECT'].includes(action)) return res.status(400).json({ status: 'Error', msg: '잘못된 결재 요청입니다.' });
 
     db.get("SELECT * FROM approvals WHERE docNum = ?", [docNum], async (err, doc) => {
         if (!doc) return res.json({ msg: "문서를 찾을 수 없습니다." });
 
         // [B-2] docType 별 stage map 사용. doc.docType은 'E' 또는 'G'.
         const docType = doc.docType || 'E';
-        const meta = getDocMeta(docType);
+        const meta = { ...getDocMeta(docType) };
         const stagesForDoc = STAGE_MAP[docType] || {};
-        const stageInfo = stagesForDoc[user.position]; // 현재 사용자가 이 docType의 결재 라인에 있는지
+        const stageInfo = doc.status === '제출완료' && isMiddleApprover(doc, user)
+            ? { from: '제출완료', to: '결재중', nextRole: '총동문회장' }
+            : (user.position === '사무총장' ? null : stagesForDoc[user.position]); // 현재 사용자가 이 docType의 결재 라인에 있는지
 
         const isOwnDoc = doc.applicantEmail === user.email;
+        if (action !== 'REJECT' && (!stageInfo || doc.status !== stageInfo.from)) return res.status(403).json({ status: 'Error', msg: '현재 결재 단계의 담당자만 승인할 수 있습니다.' });
         if (action !== 'REJECT' && user.role !== 'Admin' && !isOwnDoc) {
             // 결재 라인에 없거나, 이 단계에서 처리할 수 없는 상태면 거부
             if (!stageInfo) {
@@ -391,15 +433,15 @@ router.post('/api/approve', (req, res) => {
         if (action !== 'REJECT' && isOwnDoc && user.role !== 'Admin') {
             // [예외] '지급완료' 단계(재무국장)는 본인 기안 문서도 직접 결재 허용
             const isPaymentStage = stageInfo && stageInfo.to === '지급완료';
-            if (!isPaymentStage) {
+            const isPresidentStage = user.position === '총동문회장' && doc.status === '결재중';
+            if (!isPaymentStage && !isPresidentStage) {
                 return res.json({ status: 'Error', msg: '본인이 기안한 문서는 직접 결재할 수 없습니다.' });
             }
         }
 
         if (action === 'REJECT') {
             // [보안] 반려는 결재 라인 담당자만 가능
-            const canReject = ['사무총장', '총동문회장'].includes(user.position)
-                            || user.role === 'Admin';
+            const canReject = stageInfo && doc.status === stageInfo.from && stageInfo.to !== '지급완료' && !isOwnDoc;
             if (!canReject) {
                 return res.json({ status: 'Error', msg: '반려 권한이 없습니다.' });
             }
@@ -424,7 +466,7 @@ router.post('/api/approve', (req, res) => {
 
         let nextStatus = "", updateQuery = "", params = [], newDocNum = docNum, nextRole = "";
 
-        if (user.position === '사무총장') {
+        if (doc.status === '제출완료' && isMiddleApprover(doc, user)) {
             nextStatus = stageInfo.to;       // 'E', 'G' 모두 '결재중'
             nextRole   = stageInfo.nextRole; // '총동문회장'
             updateQuery = "UPDATE approvals SET status=?, secName=?, secSig=?, secDate=? WHERE docNum=?";
@@ -567,11 +609,12 @@ router.post('/api/lock/acquire', (req, res) => {
     db.run("UPDATE approvals SET locked_by_name=NULL, locked_by_email=NULL, locked_at=NULL WHERE locked_at < ?", [timeout]);
     const user = getUser(req);
     const { docNum } = req.body;
-    db.get("SELECT status, applicantEmail, locked_by_name, locked_by_email, locked_at FROM approvals WHERE docNum = ?", [docNum], (err, row) => {
+    db.get("SELECT * FROM approvals WHERE docNum = ?", [docNum], (err, row) => {
         if (err || !row) return res.json({ status: 'Error', msg: '문서가 없습니다.' });
         // [LOCK 정책] 종결 상태(지출결의서 '최종결재'·'지급완료', 일반 기안 '결재완료')는
         //   읽기 전용이므로 Lock 자체를 발급하지 않는다.
         if (['최종결재', '지급완료', '결재완료'].includes(row.status)) return res.json({ status: 'Success', message: 'Read-only mode (No lock required)' });
+        if (!canViewDocument(row, user)) return res.status(403).json({ status: 'Error', msg: '문서 접근 권한이 없습니다.' });
         if (row.status === '작성중' && user.email !== row.applicantEmail) return res.json({ status: 'Recalled', msg: '기안자에 의해 회수된 문서입니다.' });
         if (row.locked_at && row.locked_by_email && row.locked_by_email !== user.email) {
             const diffMin = (Date.now() - new Date(row.locked_at).getTime()) / 1000 / 60;
@@ -625,7 +668,7 @@ router.get('/api/download/*', (req, res) => {
     }
     // 콤마 경계 매칭으로 부분일치 오매칭 방지
     db.get(
-        "SELECT applicantEmail, status FROM approvals WHERE ',' || file_paths || ',' LIKE ?",
+        "SELECT * FROM approvals WHERE ',' || file_paths || ',' LIKE ?",
         [`%,${relativePath},%`],
         async (err, row) => {
             if (err) return res.status(500).send("시스템 오류");
@@ -638,7 +681,7 @@ router.get('/api/download/*', (req, res) => {
                 //   /list authClause, /form CLOSED_STATUSES, lock 정책과 일관성 유지.
                 const isPublicStatus  = ['최종결재', '지급완료', '결재완료'].includes(row.status);
                 const isOwnerOrAdmin  = (row.applicantEmail === user.email) || (user.role === 'Admin');
-                const isApprover      = ['사무총장', '총동문회장', '재무국장'].includes(user.position);
+                const isApprover = canViewDocument(row, user);
                 if (!isPublicStatus && !isOwnerOrAdmin && !isApprover) return res.status(403).send('권한이 없습니다 (결재 진행 중인 타인의 문서).');
             }
             try {

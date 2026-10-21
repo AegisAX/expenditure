@@ -1,4 +1,5 @@
 const express = require('express');
+const isEmail = require('validator/lib/isEmail');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
@@ -17,7 +18,7 @@ router.get('/api/admin/settings', requireAdmin, async (req, res) => {
     try {
         const keys = [
             'address', 'admin_phone', 'site_url',
-            'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'mail_from_name'
+            'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'mail_from_address', 'mail_from_name'
         ];
         const s = await getSettings(keys);
         const hasPass = !!s.smtp_pass;
@@ -31,6 +32,7 @@ router.get('/api/admin/settings', requireAdmin, async (req, res) => {
             // 실제 비밀번호는 클라이언트로 내보내지 않음.
             // 값이 저장되어 있으면 '********' 자리표시자만 반환.
             smtp_pass:      hasPass ? '********' : '',
+            mail_from_address: s.mail_from_address || '',
             mail_from_name: s.mail_from_name || ''
         });
     } catch (e) {
@@ -54,7 +56,7 @@ router.post('/api/admin/settings', requireAdmin, async (req, res) => {
         }
 
         // SMTP 4종 + 표시명 — 제공된 경우만 저장
-        ['smtp_host', 'smtp_port', 'smtp_user', 'mail_from_name'].forEach(k => {
+        ['smtp_host', 'smtp_port', 'smtp_user', 'mail_from_address', 'mail_from_name'].forEach(k => {
             if (body[k] !== undefined) toSave[k] = String(body[k]).trim();
         });
 
@@ -64,10 +66,13 @@ router.post('/api/admin/settings', requireAdmin, async (req, res) => {
             toSave.smtp_pass = String(body.smtp_pass);
         }
 
+        if (toSave.mail_from_address && !isEmail(toSave.mail_from_address)) {
+            return res.status(400).json({ status: 'Error', msg: '발신 이메일 주소 형식이 올바르지 않습니다.' });
+        }
         await saveSettings(toSave);
 
         // SMTP 관련 키가 하나라도 포함되어 있으면 transporter 재생성
-        const MAIL_KEYS = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'mail_from_name'];
+        const MAIL_KEYS = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'mail_from_address', 'mail_from_name'];
         const mailKeysChanged = MAIL_KEYS.some(k => Object.prototype.hasOwnProperty.call(toSave, k));
         if (mailKeysChanged) {
             await reloadTransporter();
@@ -130,7 +135,7 @@ router.post('/api/admin/settings/test-mail', requireAdmin, async (req, res) => {
             logAction(req, 'ADMIN_SETTINGS_TEST_MAIL', `테스트 메일 발송 성공: ${user.email}`);
             return res.json({
                 status: 'Success',
-                msg: `${user.email} 로 테스트 메일이 발송되었습니다. 수신을 확인해 주세요.`
+                msg: `${user.email} 로 테스트 메일을 SMTP 서버에 전달했습니다. 최종 수신 여부는 메일함에서 확인해 주세요.`
             });
         } else {
             logAction(req, 'ADMIN_SETTINGS_TEST_MAIL_FAIL', `테스트 메일 발송 실패: ${user.email} (${result.error})`);
@@ -352,7 +357,7 @@ router.get('/api/admin/doc/:docNum', requireAdmin, (req, res) => {
         if (err)  return res.status(500).json({ status: 'Error', msg: 'DB 조회 실패: ' + err.message });
         if (!doc) return res.status(404).json({ status: 'Error', msg: '문서를 찾을 수 없습니다.' });
 
-        // 사무총장 건너뛰기 가능 여부 판정 (제출완료 상태 + 아직 안 건너뛴 경우)
+        // 중간 결재 건너뛰기 가능 여부 판정 (제출완료 상태 + 아직 안 건너뛴 경우)
         const canSkipSecretary = (doc.status === '제출완료') && !doc.secSkippedBy;
 
         res.json({
@@ -367,6 +372,9 @@ router.get('/api/admin/doc/:docNum', requireAdmin, (req, res) => {
                 appPos:           doc.appPos,
                 reqDate:          doc.reqDate,
                 totalAmount:      doc.totalAmount,
+                middleApproverEmail: doc.middleApproverEmail,
+                middleApproverName: doc.middleApproverName,
+                middleApproverPosition: doc.middleApproverPosition,
                 secName:          doc.secName,
                 secDate:          doc.secDate,
                 secSkippedBy:     doc.secSkippedBy,
@@ -381,7 +389,7 @@ router.get('/api/admin/doc/:docNum', requireAdmin, (req, res) => {
     });
 });
 
-// [STAGE_SKIP] 사무총장 결재 단계 건너뛰기.
+// [STAGE_SKIP] 중간 결재 단계 건너뛰기.
 // - 권한: Admin 전용
 // - 허용 상태: '제출완료' (사무총장 결재 전 단계) 만
 // - 사유(reason) 필수 입력
@@ -410,13 +418,13 @@ router.post('/api/admin/skip-stage', requireAdmin, async (req, res) => {
         if (doc.status !== '제출완료') {
             return res.status(400).json({
                 status: 'Error',
-                msg: `현재 상태(${doc.status})에서는 사무총장 건너뛰기를 할 수 없습니다.\n'제출완료' 상태의 문서만 가능합니다.`
+                msg: `현재 상태(${doc.status})에서는 중간 결재 건너뛰기를 할 수 없습니다.\n'제출완료' 상태의 문서만 가능합니다.`
             });
         }
         if (doc.secSkippedBy) {
             return res.status(400).json({
                 status: 'Error',
-                msg: '이미 사무총장 결재 단계가 건너뛰기 처리된 문서입니다.'
+                msg: '이미 중간 결재 단계가 건너뛰기 처리된 문서입니다.'
             });
         }
 
@@ -459,12 +467,12 @@ router.post('/api/admin/skip-stage', requireAdmin, async (req, res) => {
             logAction(
                 req,
                 'STAGE_SKIP',
-                `사무총장 결재 단계 건너뛰기: ${docNum} - 사유: ${trimmedReason}`
+                `중간 결재 단계 건너뛰기: ${docNum} - 사유: ${trimmedReason}`
             );
 
             res.json({
                 status: 'Success',
-                msg: '사무총장 결재 단계를 건너뛰었습니다. 총동문회장에게 결재 요청 메일이 발송됩니다.'
+                msg: '중간 결재 단계를 건너뛰었습니다. 총동문회장에게 결재 요청 메일이 발송됩니다.'
             });
 
             // 총동문회장에게 결재 요청 메일 (fire-and-forget)
@@ -477,12 +485,12 @@ router.post('/api/admin/skip-stage', requireAdmin, async (req, res) => {
                 if (nextPerson && nextPerson.email) {
                     const appInfo = `${doc.appPos || ''} ${doc.appName || ''}`.trim();
                     // [STAGE_SKIP] 메일 본문에 건너뛰기 사유를 그대로 노출.
-                    //              제목과 본문 모두 "사무총장 단계 생략" 표식을 유지하되
+                    //              제목과 본문 모두 "중간 결재 단계 생략" 표식을 유지하되
                     //              구체적인 사유는 statusMsg 로 전달한다.
-                    const statusMsg = `결재 요청 (사무총장 결재 생략 사유: ${trimmedReason})`;
+                    const statusMsg = `결재 요청 (중간 결재 생략 사유: ${trimmedReason})`;
                     await sendEmail(
                         nextPerson.email,
-                        `[결재요청] ${meta.label} - ${doc.subject} (사무총장 결재 생략)`,
+                        `[결재요청] ${meta.label} - ${doc.subject} (중간 결재 생략)`,
                         makeEmailHtml(docNum, doc.subject, appInfo, statusMsg, baseUrl)
                     );
                 }

@@ -89,6 +89,13 @@ db.serialize(() => {
     });
   });
 
+  // NULL: 기존 사무총장 결재선, 빈 문자열: 중간 결재 생략, 이메일: 지정 결재자.
+  ['middleApproverEmail', 'middleApproverName', 'middleApproverPosition'].forEach(name => {
+    db.run(`ALTER TABLE approvals ADD COLUMN ${name} TEXT`, err => {
+      if (err && !/duplicate column name/i.test(err.message)) console.error('[DB Migrate]', err.message);
+    });
+  });
+
   // [STAGE_SKIP] 사무총장 단계 건너뛰기 기록용 컬럼
   // secSkippedBy 가 NULL 이 아니면 화면에서 사선(/)으로 표시한다.
   const skipColumns = [
@@ -130,6 +137,7 @@ db.serialize(() => {
     { key: 'smtp_port',      value: '465' },
     { key: 'smtp_user',      value: '' },
     { key: 'smtp_pass',      value: '' },
+    { key: 'mail_from_address', value: '' },
     { key: 'mail_from_name', value: '금오공고 총동문회 사무국' }
   ];
   defaultSettings.forEach(setting => {

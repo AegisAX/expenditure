@@ -318,6 +318,11 @@ tr:hover { background-color: #fafafa; }
                 </div>
             </div>
             <div class="form-group">
+                <label>발신 이메일 주소</label>
+                <input type="email" id="setting-mail-from-address" placeholder="예: office@example.com">
+                <small>SMTP 로그인 계정과 별개입니다. 비워두면 SMTP 계정이 이메일 형식일 때만 해당 주소를 사용합니다.</small>
+            </div>
+            <div class="form-group">
                 <label>발신자 표시명</label>
                 <input type="text" id="setting-mail-from-name" placeholder="예: 금오공고 총동문회 사무국">
             </div>
@@ -465,14 +470,14 @@ tr:hover { background-color: #fafafa; }
                 <dd id="docm-skip-info" style="display:none;">-</dd>
             </dl>
             <div id="docm-skip-guide" class="docm-guide" style="display:none;">
-                현재 사무총장 결재 대기 중입니다. 부재 등 사유로 결재가 지연될 경우 아래 버튼으로 단계를 건너뛸 수 있습니다.
+                현재 중간 결재자 결재 대기 중입니다. 부재 등 사유로 결재가 지연될 경우 아래 버튼으로 단계를 건너뛸 수 있습니다.
             </div>
         </div>
         <div class="modal-footer" style="justify-content:space-between;">
             <button class="btn-common btn-close" onclick="closeDocModal()">닫기</button>
             <div style="display:flex; gap:8px;">
                 <button class="btn-common btn-delete" onclick="deleteDocFromModal()" style="background:#e74c3c; color:white;">문서 삭제</button>
-                <button class="btn-common" id="docm-skip-btn" onclick="confirmSkipStage()" style="background:#BA7517; color:white; display:none;">사무총장 건너뛰기</button>
+                <button class="btn-common" id="docm-skip-btn" onclick="confirmSkipStage()" style="background:#BA7517; color:white; display:none;">중간 결재 건너뛰기</button>
             </div>
         </div>
     </div>
@@ -702,6 +707,7 @@ function loadSettings() {
         document.getElementById('setting-smtp-port').value      = d.smtp_port      || '';
         document.getElementById('setting-smtp-user').value      = d.smtp_user      || '';
         document.getElementById('setting-smtp-pass').value      = d.smtp_pass      || '';
+        document.getElementById('setting-mail-from-address').value = d.mail_from_address || '';
         document.getElementById('setting-mail-from-name').value = d.mail_from_name || '';
     });
 }
@@ -716,6 +722,7 @@ function saveSettings() {
         smtp_user:      document.getElementById('setting-smtp-user').value,
         // smtp_pass가 '********' 인 경우 서버에서 변경 없음으로 처리됨.
         smtp_pass:      document.getElementById('setting-smtp-pass').value,
+        mail_from_address: document.getElementById('setting-mail-from-address').value,
         mail_from_name: document.getElementById('setting-mail-from-name').value
     };
     fetch('/api/admin/settings', {
@@ -1069,15 +1076,15 @@ function confirmSkipStage() {
     const docNum = currentDocModalNum;
 
     Swal.fire({
-        title: '사무총장 단계 건너뛰기',
+        title: '중간 결재 단계 건너뛰기',
         html:
             '<div style="text-align:left; font-size:13px; color:#555; margin-bottom:10px;">' +
-            '문서를 사무총장 결재 없이 총동문회장 결재 단계로 넘깁니다.<br>' +
+            '문서를 중간 결재 없이 총동문회장 결재 단계로 넘깁니다.<br>' +
             '사유는 감사 로그에 기록되며 총동문회장에게 메일로 전달됩니다.' +
             '</div>',
         input: 'textarea',
         inputLabel: '건너뛰기 사유 (필수)',
-        inputPlaceholder: '예: 사무총장 해외 출장 중',
+        inputPlaceholder: '예: 중간 결재자 해외 출장 중',
         inputAttributes: { 'maxlength': 500, 'aria-label': '건너뛰기 사유' },
         showCancelButton: true,
         confirmButtonColor: '#BA7517',

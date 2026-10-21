@@ -1,5 +1,6 @@
 const nodemailer = require('nodemailer');
 const { getSettings } = require('./db');
+const isEmail = require('validator/lib/isEmail');
 
 // 현재 활성 transporter (DB 설정 미충족 시 null)
 let transporter = null;
@@ -10,6 +11,7 @@ let currentMailSettings = {
     smtp_port: '',
     smtp_user: '',
     smtp_pass: '',
+    mail_from_address: '',
     mail_from_name: ''
 };
 
@@ -22,7 +24,7 @@ function isIpAddress(host) {
     return ipv4.test(host) || ipv6.test(host);
 }
 
-const MAIL_KEYS = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'mail_from_name'];
+const MAIL_KEYS = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'mail_from_address', 'mail_from_name'];
 
 /**
  * DB에서 메일 설정을 읽어 transporter를 (재)생성한다.
@@ -133,8 +135,13 @@ function sendEmail(to, subject, html) {
     }
 
     const fromName = currentMailSettings.mail_from_name || '금오공고 총동문회 사무국';
-    const fromAddr = currentMailSettings.smtp_user;
-    const from = `"${fromName}" <${fromAddr}>`;
+    const fromAddr = (currentMailSettings.mail_from_address || currentMailSettings.smtp_user || '').trim();
+    if (!isEmail(fromAddr)) {
+        const error = '발신 이메일 주소가 올바르지 않습니다. 관리자 설정에서 실제 발신 이메일 주소를 입력해 주세요.';
+        console.error('[Mail Error]', error);
+        return Promise.resolve({ success: false, error });
+    }
+    const from = { name: fromName, address: fromAddr };
 
     console.log('[Mail Send] 요청:', { to, subject });
 
@@ -144,7 +151,7 @@ function sendEmail(to, subject, html) {
                 console.error('[Mail Error]', { to, subject, error: err.message });
                 return resolve({ success: false, error: err.message });
             }
-            console.log('[Mail Sent]', {
+            console.log('[Mail Accepted by SMTP]', {
                 to,
                 subject,
                 messageId: info.messageId,

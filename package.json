@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node tests/mail-from.js && node tests/approval-flow.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
